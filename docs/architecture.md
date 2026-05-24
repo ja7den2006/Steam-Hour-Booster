@@ -59,10 +59,12 @@ App state is stored under `%LOCALAPPDATA%\\SteamHourBooster`:
 
 Secrets should not be written into the main config payload.
 
-## First Patch Deliverables
+## Current Deliverables
 
 - repo/package scaffold
 - custom branded shell
-- config models and store
+- config and session stores
 - auth gateway wrappers
-- tests for config and auth mapping
+- credential, refresh-token, and QR onboarding bridge methods
+- saved community session bundle persistence per account
+- tests for config, auth mapping, session storage, and desktop bridge workflows

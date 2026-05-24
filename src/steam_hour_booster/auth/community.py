@@ -84,10 +84,30 @@ class SteamCommunityAuthGateway:
             account_name=poll_result.get("account_name"),
         )
 
+    def poll_qr_approval(self, pending: PendingQRLogin) -> Optional[AuthSession]:
+        poll_result = pending.client.auth.poll_auth_session_status(
+            pending.qr_session.client_id,
+            pending.qr_session.request_id,
+        )
+        if not self._has_auth_tokens(poll_result):
+            return None
+        credentials = pending.client.auth.community_credentials_from_refresh_token(
+            str(poll_result["refresh_token"])
+        )
+        pending.client.set_community_credentials(credentials)
+        return self._build_auth_session(
+            pending.client,
+            account_name=poll_result.get("account_name"),
+        )
+
     def export_session_bundle(self, credentials: CommunityCredentials) -> Dict[str, object]:
         client = self._client_factory()
         client.set_community_credentials(credentials)
         return client.export_community_session_bundle()
+
+    @staticmethod
+    def _has_auth_tokens(payload: Dict[str, object]) -> bool:
+        return bool(payload.get("access_token") and payload.get("refresh_token"))
 
     @staticmethod
     def _build_auth_session(

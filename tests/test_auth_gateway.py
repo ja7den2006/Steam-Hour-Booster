@@ -40,6 +40,15 @@ class FakeAuthService:
             "account_name": "qr-user",
         }
 
+    def poll_auth_session_status(self, client_id: int, request_id: str):
+        assert client_id == 10
+        assert request_id == "qr-request"
+        return {
+            "refresh_token": "qr-refresh",
+            "access_token": "qr-access",
+            "account_name": "qr-user",
+        }
+
     def community_credentials_from_refresh_token(self, refresh_token: str):
         assert refresh_token == "qr-refresh"
         return FakeCredentials(steam_id="7656119", session_id="session")
@@ -103,3 +112,12 @@ def test_gateway_finishes_qr_login() -> None:
 
     assert session.account_name == "qr-user"
     assert session.session_bundle["steam_id"] == "7656119"
+
+
+def test_gateway_polls_qr_login() -> None:
+    gateway = SteamCommunityAuthGateway(client_factory=FakeClient)
+    pending = gateway.begin_qr_login()
+    session = gateway.poll_qr_approval(pending)
+
+    assert session is not None
+    assert session.account_name == "qr-user"

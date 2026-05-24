@@ -160,24 +160,134 @@ __INLINE_STYLES__
                   <span class="pill pill--subtle" id="accounts-count-pill">0 configured</span>
                 </div>
                 <p class="card-copy">
-                  Accounts added later will live here with session status, login mode, and per-account game-slot targets.
+                  Signed-in accounts appear here with their session persistence status, login method, and later their game-slot targets.
                 </p>
                 <div class="account-list" id="account-list"></div>
               </article>
 
-              <article class="card">
-                <div class="eyebrow">ONBOARDING MODEL</div>
-                <h3>Session-first account design</h3>
+              <article class="card auth-card">
+                <div class="card-header">
+                  <div>
+                    <div class="eyebrow">AUTHENTICATION STUDIO</div>
+                    <h3>Onboard an account</h3>
+                  </div>
+                  <span class="pill pill--subtle" id="auth-host-pill">SteamCommunityKit</span>
+                </div>
                 <p class="card-copy">
-                  Profiles are being designed around durable session reuse instead of forcing full re-auth on every launch.
+                  Community session bundles are stored outside the main config payload. Passwords are only used for the live sign-in request and are not written into config.
                 </p>
+
+                <div class="mode-switch">
+                  <button class="mode-pill is-active" data-auth-mode="credentials">Credentials</button>
+                  <button class="mode-pill" data-auth-mode="refresh-token">Refresh Token</button>
+                  <button class="mode-pill" data-auth-mode="qr">QR Login</button>
+                </div>
+
+                <div class="status-banner status-banner--hidden" id="auth-status"></div>
+
+                <div class="auth-panel is-active" data-auth-panel="credentials">
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Display Name</span>
+                      <input id="cred-display-name" type="text" placeholder="Primary account">
+                    </label>
+                    <label class="field">
+                      <span>Account Name</span>
+                      <input id="cred-account-name" type="text" placeholder="steam_account_name">
+                    </label>
+                  </div>
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Password</span>
+                      <input id="cred-password" type="password" placeholder="Steam password">
+                    </label>
+                    <label class="field">
+                      <span>Steam Guard Code</span>
+                      <input id="cred-guard-code" type="text" placeholder="Email or app code if required">
+                    </label>
+                  </div>
+                  <div class="form-actions">
+                    <button class="action-button" id="credentials-submit-button">Sign In With Credentials</button>
+                    <p class="helper-copy">If Steam Guard is required, enter the code here and submit again.</p>
+                  </div>
+                </div>
+
+                <div class="auth-panel" data-auth-panel="refresh-token">
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Display Name</span>
+                      <input id="refresh-display-name" type="text" placeholder="Recovered session">
+                    </label>
+                    <label class="field field--wide">
+                      <span>Refresh Token</span>
+                      <textarea id="refresh-token" rows="5" placeholder="Paste a Steam refresh token"></textarea>
+                    </label>
+                  </div>
+                  <div class="form-actions">
+                    <button class="action-button" id="refresh-submit-button">Attach From Refresh Token</button>
+                    <p class="helper-copy">Use this when you already have a valid Steam community refresh token and want to seed a session bundle directly.</p>
+                  </div>
+                </div>
+
+                <div class="auth-panel" data-auth-panel="qr">
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Display Name</span>
+                      <input id="qr-display-name" type="text" placeholder="Mobile-approved account">
+                    </label>
+                    <label class="field">
+                      <span>Device Friendly Name</span>
+                      <input id="qr-device-name" type="text" placeholder="Steam Hour Booster Desktop">
+                    </label>
+                  </div>
+                  <div class="form-actions">
+                    <button class="action-button" id="qr-start-button">Start QR Login</button>
+                    <button class="secondary-button" id="qr-cancel-button" disabled>Cancel QR Session</button>
+                    <p class="helper-copy">Start the QR challenge here, approve it in the Steam mobile app, and let this screen poll until the session bundle is saved.</p>
+                  </div>
+
+                  <div class="qr-panel qr-panel--hidden" id="qr-panel">
+                    <div class="qr-panel__visual">
+                      <img id="qr-image" alt="Steam QR login challenge">
+                    </div>
+                    <div class="qr-panel__copy">
+                      <div class="eyebrow">QR CHALLENGE</div>
+                      <h4 id="qr-title">Waiting for mobile approval</h4>
+                      <p id="qr-status-copy">
+                        Approve the pending Steam sign-in request from your phone.
+                      </p>
+                      <label class="field field--wide">
+                        <span>Challenge URL</span>
+                        <input id="qr-challenge-url" type="text" readonly>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </section>
+
+            <section class="two-up">
+              <article class="card">
+                <div class="eyebrow">SESSION-FIRST DESIGN</div>
+                <h3>Persistence posture</h3>
                 <div class="meta-list">
                   <div><span>Supported login modes</span><strong>Credentials, QR, refresh token</strong></div>
                   <div><span>Steam Guard</span><strong>Email and app</strong></div>
                   <div><span>Secret storage</span><strong>Outside main config</strong></div>
                   <div><span>Per-account slots</span><strong>0 to 32 app IDs</strong></div>
-                  <div><span>Custom status slot</span><strong>Optional</strong></div>
+                  <div><span>Session reuse target</span><strong>Bundle-backed startup</strong></div>
                 </div>
+              </article>
+
+              <article class="card">
+                <div class="eyebrow">NEXT RUNTIME HOOKS</div>
+                <h3>What this unlocks</h3>
+                <ul class="plain-list">
+                  <li>Real account onboarding through the desktop shell.</li>
+                  <li>Per-account session bundle persistence under local app data.</li>
+                  <li>QR login approval flow without terminal prompts.</li>
+                  <li>A clean handoff into the future Steam client boosting runtime.</li>
+                </ul>
               </article>
             </section>
           </section>

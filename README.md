@@ -16,12 +16,19 @@ This repository starts with the production foundation:
 
 ## Current Scope
 
-This first patch intentionally establishes the product backbone before the live hour-boost runtime lands:
+The current repository state covers the first two product layers before the live hour-boost runtime lands:
 
 - branded desktop shell and page structure
-- durable config store
+- durable config and session storage
 - auth gateway abstractions wired to `SteamCommunityKit`
-- test coverage for config and auth-wrapper behavior
+- account onboarding through:
+  - username and password login
+  - Steam Guard email or app code follow-up
+  - refresh-token login
+  - QR challenge start and approval polling
+- saved session bundle persistence per account
+- account list and removal workflow
+- test coverage for config, auth mapping, session storage, and desktop bridge behavior
 
 The actual Steam CM boosting loop and multi-slot runtime will land in later patches on top of this foundation.
 
@@ -41,9 +48,9 @@ pytest -q
 ## Project Notes
 
 - Python `3.8+` is supported.
-- On Python `3.8`, the desktop stack pins to a compatible PySide6 line.
 - `SteamCommunityKit` is used only for authentication/session workflows in this app.
 - The desktop shell is delivered as a custom HTML/CSS/JS surface inside a local `pywebview` host so it remains compatible with the current Python `3.8` environment.
+- Account session bundles are stored under local app data instead of being embedded in the main config payload.
 
 ## Repository Intent
 

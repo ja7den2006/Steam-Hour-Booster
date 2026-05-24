@@ -1,5 +1,10 @@
+from dataclasses import dataclass
+from pathlib import Path
+
+from steam_hour_booster.auth.community import AuthSession
 from steam_hour_booster.config_store import ConfigStore
 from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
+from steam_hour_booster.session_store import SessionStore
 from steam_hour_booster.web.bridge import DesktopApi
 
 
@@ -46,6 +51,58 @@ class DummyWindow:
         self.destroyed = True
 
 
+@dataclass
+class DummyPendingQR:
+    qr_image_url: str
+    challenge_url: str
+
+
+class FakeAuthGateway:
+    def __init__(self) -> None:
+        self.pending = DummyPendingQR(
+            qr_image_url="https://example.test/qr.png",
+            challenge_url="https://example.test/challenge",
+        )
+        self._poll_count = 0
+
+    def login_with_credentials(self, account_name: str, password: str, **kwargs):
+        assert account_name == "primary_account"
+        assert password == "password123"
+        return AuthSession(
+            steam_id="7656119",
+            account_name=account_name,
+            refresh_token="refresh",
+            session_bundle={"steam_id": "7656119", "refresh_token": "refresh"},
+            session_state={"logged_in": True},
+        )
+
+    def login_with_refresh_token(self, refresh_token: str):
+        assert refresh_token == "refresh-token"
+        return AuthSession(
+            steam_id="7656120",
+            account_name="token_account",
+            refresh_token=refresh_token,
+            session_bundle={"steam_id": "7656120", "refresh_token": refresh_token},
+            session_state={"logged_in": True},
+        )
+
+    def begin_qr_login(self, device_friendly_name: str = "Steam Hour Booster Desktop"):
+        assert device_friendly_name
+        return self.pending
+
+    def poll_qr_approval(self, pending):
+        self._poll_count += 1
+        if self._poll_count < 2:
+            return None
+        return AuthSession(
+            steam_id="7656121",
+            account_name="qr_account",
+            refresh_token="qr-refresh",
+            session_bundle={"steam_id": "7656121", "refresh_token": "qr-refresh"},
+            session_state={"logged_in": True},
+        )
+
+
 def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     config = AppConfig(
@@ -84,3 +141,77 @@ def test_window_actions_call_host_methods(tmp_path) -> None:
     assert window.maximize_calls == 1
     assert window.restore_calls == 1
     assert window.destroyed is True
+
+
+def test_credential_login_creates_account_and_bundle(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    api = DesktopApi(
+        config_store=store,
+        config=AppConfig(),
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.login_account_with_credentials(
+        {
+            "display_name": "Primary",
+            "account_name": "primary_account",
+            "password": "password123",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["account"]["steam_id"] == "7656119"
+    assert Path(result["account"]["session_bundle_path"]).exists()
+    assert store.load().accounts[0].display_name == "Primary"
+
+
+def test_qr_flow_polls_then_creates_account(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    gateway = FakeAuthGateway()
+    api = DesktopApi(
+        config_store=store,
+        config=AppConfig(),
+        auth_gateway=gateway,
+        session_store=session_store,
+    )
+
+    started = api.begin_qr_account_login({"display_name": "QR Account"})
+    waiting = api.poll_qr_account_login(started["pending_id"])
+    approved = api.poll_qr_account_login(started["pending_id"])
+
+    assert started["ok"] is True
+    assert waiting["status"] == "waiting"
+    assert approved["ok"] is True
+    assert approved["status"] == "approved"
+    assert store.load().accounts[0].steam_id == "7656121"
+
+
+def test_remove_account_deletes_bundle(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                steam_id="7656119",
+                session_bundle_path=str(bundle_path),
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.remove_account("steam_7656119")
+
+    assert result["ok"] is True
+    assert bundle_path.exists() is False
+    assert store.load().accounts == []
