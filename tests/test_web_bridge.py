@@ -122,6 +122,7 @@ def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
     assert state["counts"]["accounts"] == 1
     assert state["counts"]["configured_slots"] == 2
     assert state["build"]["desktop_stack"] == "pywebview + HTML/CSS/JS"
+    assert "Online" in state["persona_states"]
 
 
 def test_window_actions_call_host_methods(tmp_path) -> None:
@@ -215,3 +216,81 @@ def test_remove_account_deletes_bundle(tmp_path) -> None:
     assert result["ok"] is True
     assert bundle_path.exists() is False
     assert store.load().accounts == []
+
+
+def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                account_name="primary_account",
+                steam_id="7656119",
+                login_mode="credentials",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.save_account_profile(
+        {
+            "profile_id": "steam_7656119",
+            "display_name": "Primary Updated",
+            "persona_state": "Invisible",
+            "custom_status": "Boosting quietly",
+            "games_text": "730: Counter-Strike 2\n570: Dota 2\n730",
+            "notes": "Night queue",
+        }
+    )
+
+    assert result["ok"] is True
+    saved = store.load().accounts[0]
+    assert saved.display_name == "Primary Updated"
+    assert saved.persona_state == "Invisible"
+    assert saved.custom_status == "Boosting quietly"
+    assert saved.notes == "Night queue"
+    assert len(saved.games) == 2
+    assert saved.games[0].title == "Counter-Strike 2"
+
+
+def test_save_account_profile_rejects_too_many_slots(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                steam_id="7656119",
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+    games_text = "\n".join(str(index) for index in range(1, 35))
+
+    result = api.save_account_profile(
+        {
+            "profile_id": "steam_7656119",
+            "display_name": "Primary",
+            "persona_state": "Online",
+            "games_text": games_text,
+        }
+    )
+
+    assert result["ok"] is False
+    assert "32 game slots" in result["message"]

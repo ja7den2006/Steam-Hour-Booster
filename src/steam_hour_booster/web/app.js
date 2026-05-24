@@ -34,6 +34,7 @@ const shellState = {
   maximized: false,
   bootstrap: fallbackState,
   authMode: 'credentials',
+  selectedAccountProfileId: null,
   pendingQrLogin: null,
   qrPollTimer: null,
 };
@@ -44,21 +45,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindDragRegion();
   bindAuthModes();
   bindAccountActions();
+  await waitForBridge();
   await hydrate();
   window.setTimeout(() => document.body.classList.add('is-ready'), 10);
 });
+
+async function waitForBridge() {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 1500) {
+    if (window.pywebview && window.pywebview.api) {
+      return;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  }
+}
 
 async function hydrate() {
   const bootstrap = await callApi('get_bootstrap_state');
   shellState.bootstrap = bootstrap || fallbackState;
   shellState.currentPage = shellState.bootstrap.last_page || 'dashboard';
   shellState.maximized = Boolean(shellState.bootstrap.window?.maximized);
+  const profileIds = (shellState.bootstrap.accounts || []).map((account) => account.profile_id);
+  if (!profileIds.length) {
+    shellState.selectedAccountProfileId = null;
+  } else if (!profileIds.includes(shellState.selectedAccountProfileId)) {
+    shellState.selectedAccountProfileId = profileIds[0];
+  }
 
   updateWindowButtons();
   fillOverview();
   fillAccounts();
   fillRuntime();
   fillSettings();
+  fillAccountEditor();
   updateTopbarPill();
   selectPage(shellState.currentPage, false);
   selectAuthMode(shellState.authMode);
@@ -141,6 +160,12 @@ function bindAccountActions() {
   list.addEventListener('click', async (event) => {
     const target = event.target.closest('[data-account-action]');
     if (!target) {
+      const selectedCard = event.target.closest('[data-account-select]');
+      if (selectedCard?.dataset.profileId) {
+        shellState.selectedAccountProfileId = selectedCard.dataset.profileId;
+        fillAccounts();
+        fillAccountEditor();
+      }
       return;
     }
     const action = target.dataset.accountAction;
@@ -154,6 +179,11 @@ function bindAccountActions() {
       });
     }
   });
+
+  const saveButton = document.getElementById('account-save-button');
+  if (saveButton) {
+    saveButton.addEventListener('click', saveAccountProfile);
+  }
 }
 
 async function selectPage(pageKey, persist) {
@@ -211,7 +241,9 @@ function fillAccounts() {
 
   state.accounts.forEach((account) => {
     const item = document.createElement('div');
-    item.className = 'account-item';
+    item.className = `account-item${shellState.selectedAccountProfileId === account.profile_id ? ' account-item--selected' : ''}`;
+    item.dataset.accountSelect = 'true';
+    item.dataset.profileId = account.profile_id;
     item.innerHTML = `
       <div class="account-item__header">
         <div>
@@ -232,6 +264,52 @@ function fillAccounts() {
     `;
     list.appendChild(item);
   });
+}
+
+function fillAccountEditor() {
+  const editorShell = document.getElementById('account-editor-shell');
+  const editorEmpty = document.getElementById('account-editor-empty');
+  const profile = getSelectedAccount();
+
+  hydratePersonaOptions();
+
+  if (!profile) {
+    if (editorShell) {
+      editorShell.classList.add('editor-shell--hidden');
+    }
+    if (editorEmpty) {
+      editorEmpty.classList.remove('editor-empty--hidden');
+    }
+    setText('account-editor-title', 'Runtime-ready account settings');
+    setText('account-editor-slot-pill', '0 slots');
+    return;
+  }
+
+  if (editorShell) {
+    editorShell.classList.remove('editor-shell--hidden');
+  }
+  if (editorEmpty) {
+    editorEmpty.classList.add('editor-empty--hidden');
+  }
+
+  setText('account-editor-title', profile.display_name || profile.account_name || profile.steam_id);
+  setText('account-editor-slot-pill', `${profile.game_count} slot${profile.game_count === 1 ? '' : 's'}`);
+
+  setInputValue('editor-display-name', profile.display_name || '');
+  setInputValue('editor-account-name', profile.account_name || '');
+  setInputValue('editor-steam-id', profile.steam_id || '');
+  setInputValue('editor-login-mode', profile.login_mode || '');
+  setInputValue('editor-custom-status', profile.custom_status || '');
+  setInputValue('editor-games-text', profile.games_text || '');
+  setInputValue('editor-notes', profile.notes || '');
+  setSelectValue('editor-persona-state', profile.persona_state || 'Online');
+
+  const sessionSummary = profile.session_summary || {};
+  setText('editor-session-path', profile.session_bundle_path || 'No session bundle file');
+  setText('editor-session-modified', sessionSummary.modified_at || 'Unknown');
+  setText('editor-session-refresh', sessionSummary.has_refresh_token ? 'Available' : 'Missing');
+  setText('editor-session-access', sessionSummary.has_access_token ? 'Available' : 'Missing');
+  setText('editor-session-id', sessionSummary.has_session_id ? 'Available' : 'Missing');
 }
 
 function fillRuntime() {
@@ -291,6 +369,7 @@ async function loginWithCredentials() {
   await handleMutationResult(result, {
     successMessage: result?.message || 'Credential login completed.',
     clearIds: ['cred-password', 'cred-guard-code'],
+    selectProfileId: result?.account?.profile_id,
   });
   setButtonBusy('credentials-submit-button', false, 'Sign In With Credentials');
 }
@@ -305,6 +384,7 @@ async function loginWithRefreshToken() {
   await handleMutationResult(result, {
     successMessage: result?.message || 'Refresh token attached.',
     clearIds: ['refresh-token'],
+    selectProfileId: result?.account?.profile_id,
   });
   setButtonBusy('refresh-submit-button', false, 'Attach From Refresh Token');
 }
@@ -369,6 +449,7 @@ async function pollQrLogin() {
     await handleMutationResult(result, {
       successMessage: result.message || 'QR login approved.',
       clearIds: ['qr-display-name'],
+      selectProfileId: result?.account?.profile_id,
     });
     clearQrPanel();
     return;
@@ -439,7 +520,11 @@ function updateQrStatus(text) {
 
 async function handleMutationResult(result, options = {}) {
   if (!result?.ok) {
-    setAuthStatus('error', result?.message || 'The request failed.');
+    if (options.target === 'editor') {
+      setEditorStatus('error', result?.message || 'The request failed.');
+    } else {
+      setAuthStatus('error', result?.message || 'The request failed.');
+    }
     return;
   }
 
@@ -452,12 +537,32 @@ async function handleMutationResult(result, options = {}) {
     });
   }
 
-  setAuthStatus('success', options.successMessage || result.message || 'Saved.');
+  if (options.selectProfileId) {
+    shellState.selectedAccountProfileId = options.selectProfileId;
+  }
+
+  if (options.target === 'editor') {
+    setEditorStatus('success', options.successMessage || result.message || 'Saved.');
+  } else {
+    setAuthStatus('success', options.successMessage || result.message || 'Saved.');
+  }
   await hydrate();
 }
 
 function setAuthStatus(kind, message) {
   const banner = document.getElementById('auth-status');
+  if (!banner) {
+    return;
+  }
+  banner.textContent = message || '';
+  banner.className = `status-banner status-banner--${kind}`;
+  if (!message) {
+    banner.classList.add('status-banner--hidden');
+  }
+}
+
+function setEditorStatus(kind, message) {
+  const banner = document.getElementById('account-editor-status');
   if (!banner) {
     return;
   }
@@ -490,6 +595,66 @@ function setText(id, value) {
 function getValue(id) {
   const element = document.getElementById(id);
   return element ? element.value : '';
+}
+
+function setInputValue(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.value = value;
+  }
+}
+
+function setSelectValue(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.value = value;
+  }
+}
+
+function hydratePersonaOptions() {
+  const select = document.getElementById('editor-persona-state');
+  if (!select) {
+    return;
+  }
+  const options = shellState.bootstrap.persona_states || ['Online'];
+  select.innerHTML = '';
+  options.forEach((state) => {
+    const option = document.createElement('option');
+    option.value = state;
+    option.textContent = state;
+    select.appendChild(option);
+  });
+}
+
+function getSelectedAccount() {
+  return (shellState.bootstrap.accounts || []).find(
+    (account) => account.profile_id === shellState.selectedAccountProfileId,
+  ) || null;
+}
+
+async function saveAccountProfile() {
+  const profile = getSelectedAccount();
+  if (!profile) {
+    setEditorStatus('error', 'Select an account first.');
+    return;
+  }
+
+  setButtonBusy('account-save-button', true, 'Saving...');
+  setEditorStatus('info', 'Saving account settings.');
+  const result = await callApi('save_account_profile', {
+    profile_id: profile.profile_id,
+    display_name: getValue('editor-display-name'),
+    persona_state: getValue('editor-persona-state'),
+    custom_status: getValue('editor-custom-status'),
+    games_text: getValue('editor-games-text'),
+    notes: getValue('editor-notes'),
+  });
+  await handleMutationResult(result, {
+    target: 'editor',
+    successMessage: result?.message || 'Account settings saved.',
+    selectProfileId: profile.profile_id,
+  });
+  setButtonBusy('account-save-button', false, 'Save Account Settings');
 }
 
 async function callApi(methodName, ...args) {

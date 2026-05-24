@@ -290,6 +290,97 @@ __INLINE_STYLES__
                 </ul>
               </article>
             </section>
+
+            <section class="editor-grid">
+              <article class="card editor-card">
+                <div class="card-header">
+                  <div>
+                    <div class="eyebrow">PROFILE EDITOR</div>
+                    <h3 id="account-editor-title">Runtime-ready account settings</h3>
+                  </div>
+                  <span class="pill pill--subtle" id="account-editor-slot-pill">0 slots</span>
+                </div>
+                <p class="card-copy">
+                  Configure the parts of each account that will matter when the live runtime is attached: persona state, custom status, slot list, and operator notes.
+                </p>
+
+                <div class="status-banner status-banner--hidden" id="account-editor-status"></div>
+
+                <div class="editor-empty" id="account-editor-empty">
+                  Select a saved account to edit its runtime-facing profile details.
+                </div>
+
+                <div class="editor-shell editor-shell--hidden" id="account-editor-shell">
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Display Name</span>
+                      <input id="editor-display-name" type="text" placeholder="Primary account">
+                    </label>
+                    <label class="field">
+                      <span>Persona State</span>
+                      <select id="editor-persona-state"></select>
+                    </label>
+                  </div>
+
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Account Name</span>
+                      <input id="editor-account-name" type="text" readonly>
+                    </label>
+                    <label class="field">
+                      <span>Steam ID</span>
+                      <input id="editor-steam-id" type="text" readonly>
+                    </label>
+                  </div>
+
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Login Mode</span>
+                      <input id="editor-login-mode" type="text" readonly>
+                    </label>
+                    <label class="field field--wide">
+                      <span>Custom Status</span>
+                      <input id="editor-custom-status" type="text" placeholder="Optional custom non-Steam status">
+                    </label>
+                  </div>
+
+                  <div class="form-grid">
+                    <label class="field field--wide">
+                      <span>Game Slots</span>
+                      <textarea id="editor-games-text" rows="7" placeholder="730: Counter-Strike 2&#10;570: Dota 2&#10;440"></textarea>
+                    </label>
+                  </div>
+
+                  <div class="form-grid">
+                    <label class="field field--wide">
+                      <span>Operator Notes</span>
+                      <textarea id="editor-notes" rows="5" placeholder="Per-account notes, constraints, or reminders"></textarea>
+                    </label>
+                  </div>
+
+                  <div class="editor-session card card--embedded">
+                    <div class="card-header">
+                      <div>
+                        <div class="eyebrow">SESSION BUNDLE</div>
+                        <h3>Saved bundle metadata</h3>
+                      </div>
+                    </div>
+                    <div class="meta-list">
+                      <div><span>Bundle file</span><strong id="editor-session-path">Loading</strong></div>
+                      <div><span>Modified</span><strong id="editor-session-modified">Loading</strong></div>
+                      <div><span>Refresh token</span><strong id="editor-session-refresh">Loading</strong></div>
+                      <div><span>Access token</span><strong id="editor-session-access">Loading</strong></div>
+                      <div><span>Session ID</span><strong id="editor-session-id">Loading</strong></div>
+                    </div>
+                  </div>
+
+                  <div class="form-actions">
+                    <button class="action-button" id="account-save-button">Save Account Settings</button>
+                    <p class="helper-copy">Game slots accept one app id per line, or `app_id: Title` if you want a label shown in the shell.</p>
+                  </div>
+                </div>
+              </article>
+            </section>
           </section>
 
           <section class="page" data-page="runtime">

@@ -67,4 +67,5 @@ Secrets should not be written into the main config payload.
 - auth gateway wrappers
 - credential, refresh-token, and QR onboarding bridge methods
 - saved community session bundle persistence per account
+- runtime-facing account profile editing and slot-list validation
 - tests for config, auth mapping, session storage, and desktop bridge workflows

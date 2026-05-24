@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from steamcommunitykit.exceptions import (
@@ -14,7 +14,7 @@ from steamcommunitykit.exceptions import (
 )
 from steam_hour_booster.auth.community import AuthSession, PendingQRLogin, SteamCommunityAuthGateway
 from steam_hour_booster.config_store import ConfigStore
-from steam_hour_booster.models import AccountProfile, AppConfig
+from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
 from steam_hour_booster.paths import config_path, logs_dir, sessions_dir
 from steam_hour_booster.session_store import SessionStore
 
@@ -26,6 +26,18 @@ class PendingQRLoginRecord:
     pending: PendingQRLogin
     device_friendly_name: str
     poll_attempts: int = 0
+
+
+PERSONA_STATES = [
+    "Online",
+    "Busy",
+    "Away",
+    "Snooze",
+    "LookingToTrade",
+    "LookingToPlay",
+    "Invisible",
+    "Offline",
+]
 
 
 class DesktopApi:
@@ -86,6 +98,7 @@ class DesktopApi:
             "onboarding": {
                 "pending_qr_login_count": len(self._pending_qr_logins),
             },
+            "persona_states": list(PERSONA_STATES),
         }
 
     def set_last_page(self, page_key: str) -> Dict[str, Any]:
@@ -246,6 +259,59 @@ class DesktopApi:
             message="That account profile was not found.",
         )
 
+    def save_account_profile(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        values = payload or {}
+        profile_id = self._normalize_required_string(values.get("profile_id"), "profile id")
+        account = self._find_account_by_profile_id(profile_id)
+        if account is None:
+            return self._message_result(
+                ok=False,
+                status="not_found",
+                message="That account profile was not found.",
+            )
+
+        try:
+            display_name = (
+                self._normalize_optional_string(values.get("display_name"))
+                or account.account_name
+                or account.steam_id
+                or account.profile_id
+            )
+            persona_state = self._normalize_persona_state(values.get("persona_state"))
+            custom_status = self._normalize_optional_string(values.get("custom_status"))
+            notes = self._normalize_optional_string(values.get("notes"))
+            games = self._parse_games_text(values.get("games_text"))
+
+            updated = AccountProfile(
+                profile_id=account.profile_id,
+                display_name=display_name,
+                account_name=account.account_name,
+                steam_id=account.steam_id,
+                login_mode=account.login_mode,
+                persona_state=persona_state,
+                custom_status=custom_status,
+                session_bundle_path=account.session_bundle_path,
+                notes=notes,
+                games=games,
+            )
+
+            for index, existing in enumerate(self._config.accounts):
+                if existing.profile_id == account.profile_id:
+                    self._config.accounts[index] = updated
+                    break
+
+            self._config.accounts.sort(key=lambda item: item.display_name.lower())
+            self._persist()
+            return {
+                "ok": True,
+                "status": "saved",
+                "message": "Account profile saved.",
+                "account": self._serialize_account(updated),
+                "state": self.get_bootstrap_state(),
+            }
+        except Exception as exc:
+            return self._error_result(exc)
+
     def minimize_window(self) -> Dict[str, Any]:
         if self._window is not None:
             self._window.minimize()
@@ -360,6 +426,12 @@ class DesktopApi:
                 return account
         return None
 
+    def _find_account_by_profile_id(self, profile_id: str) -> Optional[AccountProfile]:
+        for account in self._config.accounts:
+            if account.profile_id == profile_id:
+                return account
+        return None
+
     def _message_result(self, *, ok: bool, status: str, message: str) -> Dict[str, Any]:
         return {
             "ok": ok,
@@ -407,6 +479,63 @@ class DesktopApi:
             return normalized
         raise SteamValidationError("%s is required." % label.capitalize())
 
+    def _normalize_persona_state(self, value: Any) -> str:
+        normalized = self._normalize_optional_string(value) or "Online"
+        if normalized not in PERSONA_STATES:
+            raise SteamValidationError("Persona state is invalid.")
+        return normalized
+
+    def _parse_games_text(self, raw_value: Any) -> List[IdleGame]:
+        text = self._normalize_optional_string(raw_value)
+        if not text:
+            return []
+
+        games: List[IdleGame] = []
+        seen_app_ids = set()
+        raw_lines = []
+        for line in text.splitlines():
+            normalized_line = line.strip()
+            if not normalized_line:
+                continue
+            if "|" not in normalized_line and ":" not in normalized_line and "," in normalized_line:
+                segments = [segment.strip() for segment in normalized_line.split(",") if segment.strip()]
+                raw_lines.extend(segments)
+                continue
+            raw_lines.append(normalized_line)
+
+        for line in raw_lines:
+            app_id_text = line
+            title = ""
+            if "|" in line:
+                app_id_text, title = line.split("|", 1)
+            elif ":" in line:
+                left, right = line.split(":", 1)
+                if left.strip().isdigit():
+                    app_id_text, title = left, right
+            app_id_text = app_id_text.strip()
+            if not app_id_text.isdigit():
+                raise SteamValidationError(
+                    "Game entries must start with a numeric app id. Use formats like '730' or '730: Counter-Strike 2'."
+                )
+            app_id = int(app_id_text)
+            if app_id <= 0:
+                raise SteamValidationError("Game app ids must be positive integers.")
+            if app_id in seen_app_ids:
+                continue
+            seen_app_ids.add(app_id)
+            games.append(
+                IdleGame(
+                    app_id=app_id,
+                    title=title.strip(),
+                    enabled=True,
+                )
+            )
+
+        if len(games) > 32:
+            raise SteamValidationError("A single account can only queue up to 32 game slots.")
+
+        return games
+
     def _on_maximized(self, *args) -> None:
         self._maximized = True
         self._persist()
@@ -428,6 +557,11 @@ class DesktopApi:
     def _serialize_account(self, account: AccountProfile) -> Dict[str, Any]:
         session_path = str(account.session_bundle_path or "")
         has_session_bundle = bool(session_path and Path(session_path).exists())
+        session_summary = (
+            SessionStore.summarize_bundle_path(session_path)
+            if session_path
+            else {"exists": False, "path": ""}
+        )
         return {
             "profile_id": account.profile_id,
             "display_name": account.display_name,
@@ -436,8 +570,21 @@ class DesktopApi:
             "login_mode": account.login_mode,
             "persona_state": account.persona_state,
             "custom_status": account.custom_status,
+            "notes": account.notes,
             "session_bundle_path": session_path,
             "has_session_bundle": has_session_bundle,
+            "session_summary": session_summary,
             "game_count": len(account.games),
             "games": [game.to_dict() for game in account.games],
+            "games_text": self._format_games_text(account.games),
         }
+
+    @staticmethod
+    def _format_games_text(games: List[IdleGame]) -> str:
+        lines = []
+        for game in games:
+            if game.title:
+                lines.append("%s: %s" % (game.app_id, game.title))
+            else:
+                lines.append(str(game.app_id))
+        return "\n".join(lines)

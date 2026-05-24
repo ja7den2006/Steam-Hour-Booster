@@ -423,6 +423,18 @@ textarea {
   border-radius: 18px;
   border: 1px solid rgba(43, 52, 62, 0.92);
   background: rgba(10, 15, 21, 0.62);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.account-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(79, 92, 107, 0.96);
+}
+
+.account-item--selected {
+  border-color: rgba(124, 82, 49, 0.96);
+  background: rgba(28, 21, 17, 0.76);
 }
 
 .account-item__header {
@@ -656,6 +668,54 @@ textarea {
 .helper-copy {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.editor-grid {
+  margin-top: 18px;
+}
+
+.editor-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.editor-empty {
+  padding: 24px;
+  border-radius: 20px;
+  border: 1px dashed rgba(55, 65, 76, 0.98);
+  color: var(--text-soft);
+  background: rgba(10, 15, 21, 0.46);
+}
+
+.editor-empty--hidden,
+.editor-shell--hidden {
+  display: none;
+}
+
+.editor-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field select {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(43, 52, 62, 0.96);
+  background: rgba(9, 13, 18, 0.92);
+  padding: 14px 16px;
+  color: var(--text);
+  outline: none;
+}
+
+.field select:focus {
+  border-color: rgba(230, 138, 68, 0.92);
+  box-shadow: 0 0 0 3px rgba(230, 138, 68, 0.14);
+}
+
+.editor-session {
+  margin-top: 4px;
 }
 
 .qr-panel {

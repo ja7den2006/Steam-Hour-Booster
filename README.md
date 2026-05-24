@@ -28,6 +28,12 @@ The current repository state covers the first two product layers before the live
   - QR challenge start and approval polling
 - saved session bundle persistence per account
 - account list and removal workflow
+- runtime-facing account profile editing:
+  - persona state
+  - custom status
+  - slot list up to 32 app IDs
+  - operator notes
+  - session bundle metadata visibility
 - test coverage for config, auth mapping, session storage, and desktop bridge behavior
 
 The actual Steam CM boosting loop and multi-slot runtime will land in later patches on top of this foundation.
