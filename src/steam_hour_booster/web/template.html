@@ -339,6 +339,13 @@ __INLINE_STYLES__
                       <span>Login Mode</span>
                       <input id="editor-login-mode" type="text" readonly>
                     </label>
+                    <label class="field">
+                      <span>Conflict Policy</span>
+                      <select id="editor-conflict-policy"></select>
+                    </label>
+                  </div>
+
+                  <div class="form-grid">
                     <label class="field field--wide">
                       <span>Custom Status</span>
                       <input id="editor-custom-status" type="text" placeholder="Optional custom non-Steam status">
@@ -441,6 +448,10 @@ __INLINE_STYLES__
                 <div>
                   <span>Paused lanes</span>
                   <strong id="runtime-paused-count">0</strong>
+                </div>
+                <div>
+                  <span>Blocked lanes</span>
+                  <strong id="runtime-blocked-count">0</strong>
                 </div>
                 <div>
                   <span>Active slots</span>

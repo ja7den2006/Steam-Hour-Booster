@@ -22,9 +22,13 @@ const fallbackState = {
     height: 920,
   },
   accounts: [],
+  conflict_policies: [
+    { value: 'pause', label: 'Pause and Wait' },
+    { value: 'kick', label: 'Force Kick' },
+  ],
   runtime: {
     slot_ceiling: 32,
-    conflict_policy: 'Pause before force-kick',
+    conflict_policy: 'Per-account policy with pause or force-kick',
     reconnect_posture: 'Backoff and resume',
     transport_name: 'valvepython-steam',
     preview_mode: false,
@@ -32,6 +36,8 @@ const fallbackState = {
       tracked_accounts: 0,
       ready_accounts: 0,
       boosting_accounts: 0,
+      paused_accounts: 0,
+      blocked_accounts: 0,
       error_accounts: 0,
       active_slots: 0,
     },
@@ -351,6 +357,7 @@ function fillAccounts() {
       </div>
       <div class="account-item__meta">
         <div><span>Persona</span><strong>${escapeHtml(account.persona_state)}</strong></div>
+        <div><span>Policy</span><strong>${escapeHtml(formatConflictPolicy(account.conflict_policy))}</strong></div>
         <div><span>Games</span><strong>${account.game_count}</strong></div>
         <div><span>Session</span><strong>${account.has_session_bundle ? 'Saved' : 'Missing'}</strong></div>
       </div>
@@ -366,6 +373,7 @@ function fillAccountEditor() {
   const profile = getSelectedAccount();
 
   hydratePersonaOptions();
+  hydrateConflictPolicyOptions();
 
   if (!profile) {
     if (editorShell) {
@@ -397,6 +405,7 @@ function fillAccountEditor() {
   setInputValue('editor-games-text', profile.games_text || '');
   setInputValue('editor-notes', profile.notes || '');
   setSelectValue('editor-persona-state', profile.persona_state || 'Online');
+  setSelectValue('editor-conflict-policy', profile.conflict_policy || 'pause');
 
   const sessionSummary = profile.session_summary || {};
   setText('editor-session-path', profile.session_bundle_path || 'No session bundle file');
@@ -414,6 +423,7 @@ function fillRuntime() {
   setText('runtime-ready-count', String(runtime.counts?.ready_accounts || 0));
   setText('runtime-boosting-count', String(runtime.counts?.boosting_accounts || 0));
   setText('runtime-paused-count', String(runtime.counts?.paused_accounts || 0));
+  setText('runtime-blocked-count', String(runtime.counts?.blocked_accounts || 0));
   setText('runtime-active-slot-count', String(runtime.counts?.active_slots || 0));
   setText('runtime-transport-name', runtime.transport_name || 'Unknown');
   setText('runtime-accounts-pill', `${runtime.counts?.tracked_accounts || 0} tracked`);
@@ -481,6 +491,10 @@ function fillRuntimeAccounts(statuses) {
           <strong>${escapeHtml(formatRuntimeAuthSource(status.auth_source))}</strong>
         </div>
         <div>
+          <span>Policy</span>
+          <strong>${escapeHtml(formatConflictPolicy(status.conflict_policy))}</strong>
+        </div>
+        <div>
           <span>Reconnects</span>
           <strong>${Number(status.reconnect_attempts || 0)}</strong>
         </div>
@@ -488,6 +502,7 @@ function fillRuntimeAccounts(statuses) {
       <div class="runtime-account__message">${escapeHtml(status.message || 'No runtime message available.')}</div>
       <div class="runtime-account__details">
         <div class="runtime-account__detail"><strong>Connected:</strong> ${escapeHtml(formatRuntimeTimestamp(status.connected_at))}</div>
+        ${status.blocked_by_playing_session ? `<div class="runtime-account__detail"><strong>Blocked app:</strong> ${escapeHtml(formatBlockedApp(status.blocked_app_id))}</div>` : ''}
         ${status.last_error ? `<div class="runtime-account__detail"><strong>Last issue:</strong> ${escapeHtml(status.last_error)}</div>` : ''}
       </div>
     `;
@@ -834,6 +849,21 @@ function hydratePersonaOptions() {
   });
 }
 
+function hydrateConflictPolicyOptions() {
+  const select = document.getElementById('editor-conflict-policy');
+  if (!select) {
+    return;
+  }
+  const options = shellState.bootstrap.conflict_policies || fallbackState.conflict_policies;
+  select.innerHTML = '';
+  options.forEach((policy) => {
+    const option = document.createElement('option');
+    option.value = policy.value;
+    option.textContent = policy.label;
+    select.appendChild(option);
+  });
+}
+
 function getSelectedAccount() {
   return (shellState.bootstrap.accounts || []).find(
     (account) => account.profile_id === shellState.selectedAccountProfileId,
@@ -853,6 +883,7 @@ async function saveAccountProfile() {
     profile_id: profile.profile_id,
     display_name: getValue('editor-display-name'),
     persona_state: getValue('editor-persona-state'),
+    conflict_policy: getValue('editor-conflict-policy'),
     custom_status: getValue('editor-custom-status'),
     games_text: getValue('editor-games-text'),
     notes: getValue('editor-notes'),
@@ -952,6 +983,21 @@ function formatRuntimeAuthSource(source) {
     return 'Login key';
   }
   return source.replace(/_/g, ' ');
+}
+
+function formatConflictPolicy(policy) {
+  if (policy === 'kick') {
+    return 'Force Kick';
+  }
+  return 'Pause and Wait';
+}
+
+function formatBlockedApp(appId) {
+  const numericId = Number(appId || 0);
+  if (!numericId) {
+    return 'Another active session';
+  }
+  return `App ${numericId}`;
 }
 
 function formatRuntimeTimestamp(value) {

@@ -14,6 +14,7 @@ def test_app_config_round_trip() -> None:
                 account_name="jayden_main",
                 steam_id="76561198000000000",
                 login_mode="qr",
+                conflict_policy="kick",
                 custom_status="Boosting library",
                 games=[
                     IdleGame(app_id=730, title="Counter-Strike 2"),
@@ -29,5 +30,6 @@ def test_app_config_round_trip() -> None:
     assert restored.theme == "ember"
     assert restored.last_page == "runtime"
     assert len(restored.accounts) == 1
+    assert restored.accounts[0].conflict_policy == "kick"
     assert restored.accounts[0].games[0].app_id == 730
     assert restored.accounts[0].games[1].enabled is False

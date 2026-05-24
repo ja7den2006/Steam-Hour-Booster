@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+CONFLICT_POLICY_PAUSE = "pause"
+CONFLICT_POLICY_KICK = "kick"
+CONFLICT_POLICIES = (
+    CONFLICT_POLICY_PAUSE,
+    CONFLICT_POLICY_KICK,
+)
+
 
 @dataclass
 class IdleGame:
@@ -34,6 +41,7 @@ class AccountProfile:
     steam_id: str = ""
     login_mode: str = "credentials"
     persona_state: str = "Online"
+    conflict_policy: str = CONFLICT_POLICY_PAUSE
     custom_status: str = ""
     session_bundle_path: Optional[str] = None
     notes: str = ""
@@ -47,6 +55,7 @@ class AccountProfile:
             "steam_id": self.steam_id,
             "login_mode": self.login_mode,
             "persona_state": self.persona_state,
+            "conflict_policy": self.conflict_policy,
             "custom_status": self.custom_status,
             "session_bundle_path": self.session_bundle_path,
             "notes": self.notes,
@@ -62,6 +71,7 @@ class AccountProfile:
             steam_id=str(payload.get("steam_id", "")),
             login_mode=str(payload.get("login_mode", "credentials")),
             persona_state=str(payload.get("persona_state", "Online")),
+            conflict_policy=str(payload.get("conflict_policy", CONFLICT_POLICY_PAUSE)),
             custom_status=str(payload.get("custom_status", "")),
             session_bundle_path=payload.get("session_bundle_path"),
             notes=str(payload.get("notes", "")),

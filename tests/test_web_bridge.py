@@ -1,3 +1,5 @@
+import base64
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -7,6 +9,14 @@ from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
 from steam_hour_booster.runtime import PreviewBoosterRuntime, RuntimeController
 from steam_hour_booster.session_store import SessionStore
 from steam_hour_booster.web.bridge import DesktopApi
+
+
+def build_client_refresh_token(steam_id: str) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode("utf-8")).decode("ascii").rstrip("=")
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"iss": "steam", "aud": ["client"], "sub": steam_id}).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return "%s.%s.signature" % (header, payload)
 
 
 class EventHook:
@@ -131,6 +141,7 @@ def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
     assert state["counts"]["configured_slots"] == 2
     assert state["build"]["desktop_stack"] == "pywebview + HTML/CSS/JS"
     assert "Online" in state["persona_states"]
+    assert any(item["value"] == "kick" for item in state["conflict_policies"])
 
 
 def test_window_actions_call_host_methods(tmp_path) -> None:
@@ -255,6 +266,7 @@ def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
             "profile_id": "steam_7656119",
             "display_name": "Primary Updated",
             "persona_state": "Invisible",
+            "conflict_policy": "kick",
             "custom_status": "Boosting quietly",
             "games_text": "730: Counter-Strike 2\n570: Dota 2\n730",
             "notes": "Night queue",
@@ -265,6 +277,7 @@ def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
     saved = store.load().accounts[0]
     assert saved.display_name == "Primary Updated"
     assert saved.persona_state == "Invisible"
+    assert saved.conflict_policy == "kick"
     assert saved.custom_status == "Boosting quietly"
     assert saved.notes == "Night queue"
     assert len(saved.games) == 2
@@ -386,7 +399,10 @@ def test_runtime_controls_start_and_stop_lanes(tmp_path) -> None:
 def test_runtime_refresh_exposes_transport_status(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     session_store = SessionStore(base_dir=tmp_path / "sessions")
-    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {"steam_id": "7656119", "refresh_token": build_client_refresh_token("7656119")},
+    )
     config = AppConfig(
         accounts=[
             AccountProfile(
@@ -417,7 +433,10 @@ def test_runtime_refresh_exposes_transport_status(tmp_path) -> None:
 def test_runtime_poll_returns_current_state(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     session_store = SessionStore(base_dir=tmp_path / "sessions")
-    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {"steam_id": "7656119", "refresh_token": build_client_refresh_token("7656119")},
+    )
     config = AppConfig(
         accounts=[
             AccountProfile(

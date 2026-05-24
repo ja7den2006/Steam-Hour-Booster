@@ -14,7 +14,14 @@ from steamcommunitykit.exceptions import (
 )
 from steam_hour_booster.auth.community import AuthSession, PendingQRLogin, SteamCommunityAuthGateway
 from steam_hour_booster.config_store import ConfigStore
-from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
+from steam_hour_booster.models import (
+    CONFLICT_POLICIES,
+    CONFLICT_POLICY_KICK,
+    CONFLICT_POLICY_PAUSE,
+    AccountProfile,
+    AppConfig,
+    IdleGame,
+)
 from steam_hour_booster.paths import config_path, logs_dir, sessions_dir
 from steam_hour_booster.runtime import RuntimeController, RuntimeState
 from steam_hour_booster.session_store import SessionStore
@@ -38,6 +45,19 @@ PERSONA_STATES = [
     "LookingToPlay",
     "Invisible",
     "Offline",
+]
+
+CONFLICT_POLICY_OPTIONS = [
+    {
+        "value": CONFLICT_POLICY_PAUSE,
+        "label": "Pause and Wait",
+        "description": "Hold the lane until the other Steam playing session ends.",
+    },
+    {
+        "value": CONFLICT_POLICY_KICK,
+        "label": "Force Kick",
+        "description": "Ask Steam to remove the other playing session and reclaim the lane.",
+    },
 ]
 
 
@@ -99,7 +119,7 @@ class DesktopApi:
             "accounts": [self._serialize_account(account) for account in self._config.accounts],
             "runtime": {
                 "slot_ceiling": 32,
-                "conflict_policy": "Pause before force-kick",
+                "conflict_policy": "Per-account policy with pause or force-kick",
                 "reconnect_posture": "Backoff and resume",
                 **runtime_snapshot,
             },
@@ -107,6 +127,7 @@ class DesktopApi:
                 "pending_qr_login_count": len(self._pending_qr_logins),
             },
             "persona_states": list(PERSONA_STATES),
+            "conflict_policies": list(CONFLICT_POLICY_OPTIONS),
         }
 
     def set_last_page(self, page_key: str) -> Dict[str, Any]:
@@ -287,6 +308,7 @@ class DesktopApi:
                 or account.profile_id
             )
             persona_state = self._normalize_persona_state(values.get("persona_state"))
+            conflict_policy = self._normalize_conflict_policy(values.get("conflict_policy"))
             custom_status = self._normalize_optional_string(values.get("custom_status"))
             notes = self._normalize_optional_string(values.get("notes"))
             games = self._parse_games_text(values.get("games_text"))
@@ -298,6 +320,7 @@ class DesktopApi:
                 steam_id=account.steam_id,
                 login_mode=account.login_mode,
                 persona_state=persona_state,
+                conflict_policy=conflict_policy,
                 custom_status=custom_status,
                 session_bundle_path=account.session_bundle_path,
                 notes=notes,
@@ -503,6 +526,7 @@ class DesktopApi:
             or (existing.account_name if existing else "")
         )
         persona_state = existing.persona_state if existing else "Online"
+        conflict_policy = existing.conflict_policy if existing else CONFLICT_POLICY_PAUSE
         custom_status = existing.custom_status if existing else ""
         notes = existing.notes if existing else ""
         games = list(existing.games) if existing else []
@@ -514,6 +538,7 @@ class DesktopApi:
             steam_id=steam_id,
             login_mode=login_mode,
             persona_state=persona_state,
+            conflict_policy=conflict_policy,
             custom_status=custom_status,
             session_bundle_path=str(session_path),
             notes=notes,
@@ -605,6 +630,12 @@ class DesktopApi:
             raise SteamValidationError("Persona state is invalid.")
         return normalized
 
+    def _normalize_conflict_policy(self, value: Any) -> str:
+        normalized = self._normalize_optional_string(value) or CONFLICT_POLICY_PAUSE
+        if normalized not in CONFLICT_POLICIES:
+            raise SteamValidationError("Conflict policy is invalid.")
+        return normalized
+
     def _parse_games_text(self, raw_value: Any) -> List[IdleGame]:
         text = self._normalize_optional_string(raw_value)
         if not text:
@@ -689,6 +720,7 @@ class DesktopApi:
             "steam_id": account.steam_id,
             "login_mode": account.login_mode,
             "persona_state": account.persona_state,
+            "conflict_policy": account.conflict_policy,
             "custom_status": account.custom_status,
             "notes": account.notes,
             "session_bundle_path": session_path,

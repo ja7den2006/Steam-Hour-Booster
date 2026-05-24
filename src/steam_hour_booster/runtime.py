@@ -10,7 +10,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Protocol
 
-from steam_hour_booster.models import AccountProfile
+from steam_hour_booster.models import (
+    CONFLICT_POLICY_KICK,
+    CONFLICT_POLICY_PAUSE,
+    AccountProfile,
+)
 from steam_hour_booster.session_store import SessionStore
 
 try:
@@ -38,6 +42,12 @@ def _iso_timestamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _conflict_policy_label(policy: str) -> str:
+    if policy == CONFLICT_POLICY_KICK:
+        return "Force Kick"
+    return "Pause and Wait"
+
+
 class RuntimeState(str, Enum):
     IDLE = "idle"
     READY = "ready"
@@ -55,6 +65,7 @@ class AccountRuntimeStatus:
     session_ready: bool = False
     login_mode: str = ""
     persona_state: str = "Online"
+    conflict_policy: str = CONFLICT_POLICY_PAUSE
     session_bundle_path: str = ""
     configured_app_ids: List[int] = field(default_factory=list)
     active_app_ids: List[int] = field(default_factory=list)
@@ -62,6 +73,8 @@ class AccountRuntimeStatus:
     auth_source: str = ""
     reconnect_attempts: int = 0
     connected_at: str = ""
+    blocked_by_playing_session: bool = False
+    blocked_app_id: int = 0
     last_error: str = ""
     message: str = ""
     updated_at: str = ""
@@ -81,6 +94,8 @@ class AccountRuntimeStatus:
             "session_ready": self.session_ready,
             "login_mode": self.login_mode,
             "persona_state": self.persona_state,
+            "conflict_policy": self.conflict_policy,
+            "conflict_policy_label": _conflict_policy_label(self.conflict_policy),
             "session_bundle_path": self.session_bundle_path,
             "configured_app_ids": list(self.configured_app_ids),
             "configured_slot_count": len(self.configured_app_ids),
@@ -90,6 +105,8 @@ class AccountRuntimeStatus:
             "auth_source": self.auth_source,
             "reconnect_attempts": self.reconnect_attempts,
             "connected_at": self.connected_at,
+            "blocked_by_playing_session": self.blocked_by_playing_session,
+            "blocked_app_id": self.blocked_app_id,
             "last_error": self.last_error,
             "message": self.message,
             "updated_at": self.updated_at,
@@ -118,6 +135,7 @@ class RuntimeSnapshot:
         boosting_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.BOOSTING)
         paused_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.PAUSED)
         error_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.ERROR)
+        blocked_count = sum(1 for status in self.accounts.values() if status.blocked_by_playing_session)
         active_slot_count = sum(len(status.active_app_ids) for status in self.accounts.values())
         return {
             "transport_name": self.transport_name,
@@ -129,6 +147,7 @@ class RuntimeSnapshot:
                 "boosting_accounts": boosting_count,
                 "paused_accounts": paused_count,
                 "error_accounts": error_count,
+                "blocked_accounts": blocked_count,
                 "active_slots": active_slot_count,
             },
             "statuses": statuses,
@@ -149,6 +168,9 @@ class RuntimeLaneTelemetry:
     auth_source: str = ""
     reconnect_attempts: int = 0
     connected_at: str = ""
+    conflict_policy: str = CONFLICT_POLICY_PAUSE
+    blocked_by_playing_session: bool = False
+    blocked_app_id: int = 0
     last_error: str = ""
     message: str = ""
     updated_at: str = ""
@@ -309,6 +331,7 @@ class _LiveWorkerConfig:
     steam_id: str
     refresh_token: str
     persona_state: str
+    conflict_policy: str
     custom_status: str
     app_ids: List[int]
 
@@ -349,6 +372,10 @@ class _LiveBoostWorker:
         self._auth_source = ""
         self._reconnect_attempts = 0
         self._connected_at = ""
+        self._blocked_by_playing_session = False
+        self._blocked_app_id = 0
+        self._awaiting_unblock_reapply = False
+        self._last_kick_attempt_at = 0.0
         self._last_error = ""
         self._updated_at = _iso_timestamp()
         self._error_message = ""
@@ -435,6 +462,9 @@ class _LiveBoostWorker:
                 auth_source=self._auth_source,
                 reconnect_attempts=self._reconnect_attempts,
                 connected_at=self._connected_at,
+                conflict_policy=self._desired_config.conflict_policy,
+                blocked_by_playing_session=self._blocked_by_playing_session,
+                blocked_app_id=self._blocked_app_id,
                 last_error=self._last_error,
                 message=self._message,
                 updated_at=self._updated_at,
@@ -477,8 +507,12 @@ class _LiveBoostWorker:
 
                 with self._condition:
                     needs_apply = self._applied_revision < self._desired_revision
+                    awaiting_unblock_reapply = self._awaiting_unblock_reapply
 
-                if needs_apply:
+                if self._synchronize_playing_lock(client):
+                    continue
+
+                if needs_apply or awaiting_unblock_reapply:
                     self._apply_desired_config(self._auth_source or "refresh_token", mode="updated")
 
                 if self._stop_event.is_set():
@@ -536,6 +570,7 @@ class _LiveBoostWorker:
 
         if allow_login_key and self._cached_login_key and config.account_name:
             login_key_client = self._client_factory()
+            self._attach_client_hooks(login_key_client)
             login_key_client.set_credential_location(str(self._credential_dir))
             result = login_key_client.login(config.account_name, login_key=self._cached_login_key)
             if result == EResult.OK:
@@ -545,6 +580,7 @@ class _LiveBoostWorker:
             self._safe_disconnect_client(login_key_client)
 
         refresh_client = self._client_factory()
+        self._attach_client_hooks(refresh_client)
         refresh_client.set_credential_location(str(self._credential_dir))
         result = refresh_client.login_with_refresh_token(
             config.refresh_token,
@@ -582,10 +618,14 @@ class _LiveBoostWorker:
             auth_source=auth_source,
             reconnect_attempts=self._reconnect_attempts,
             connected_at=connected_at,
+            conflict_policy=config.conflict_policy,
+            blocked_by_playing_session=False,
+            blocked_app_id=0,
             last_error="",
         )
         with self._condition:
             self._applied_revision = revision
+            self._awaiting_unblock_reapply = False
             self._condition.notify_all()
             return RuntimeStartResult(
                 active_app_ids=list(self._active_app_ids),
@@ -623,6 +663,9 @@ class _LiveBoostWorker:
         auth_source: Optional[str] = None,
         reconnect_attempts: Optional[int] = None,
         connected_at: Optional[str] = None,
+        conflict_policy: Optional[str] = None,
+        blocked_by_playing_session: Optional[bool] = None,
+        blocked_app_id: Optional[int] = None,
         last_error: Optional[str] = None,
     ) -> None:
         with self._condition:
@@ -636,6 +679,12 @@ class _LiveBoostWorker:
                 self._reconnect_attempts = reconnect_attempts
             if connected_at is not None:
                 self._connected_at = connected_at
+            if conflict_policy is not None:
+                self._desired_config.conflict_policy = conflict_policy
+            if blocked_by_playing_session is not None:
+                self._blocked_by_playing_session = blocked_by_playing_session
+            if blocked_app_id is not None:
+                self._blocked_app_id = int(blocked_app_id)
             if last_error is not None:
                 self._last_error = last_error
             self._updated_at = _iso_timestamp()
@@ -692,6 +741,7 @@ class _LiveBoostWorker:
                 steam_id=self._desired_config.steam_id,
                 refresh_token=self._desired_config.refresh_token,
                 persona_state=self._desired_config.persona_state,
+                conflict_policy=self._desired_config.conflict_policy,
                 custom_status=self._desired_config.custom_status,
                 app_ids=list(self._desired_config.app_ids),
             )
@@ -714,6 +764,95 @@ class _LiveBoostWorker:
                 client.disconnect()
         except Exception:
             pass
+
+    def _attach_client_hooks(self, client: RefreshTokenSteamClient) -> None:
+        if not hasattr(client, "on"):
+            return
+        client.on(EMsg.ClientPlayingSessionState, self._handle_playing_session_state)
+
+    def _handle_playing_session_state(self, message) -> None:
+        body = getattr(message, "body", None)
+        blocked = bool(getattr(body, "playing_blocked", False))
+        app_id = int(getattr(body, "playing_app", 0) or 0)
+        with self._condition:
+            previously_blocked = self._blocked_by_playing_session
+            self._blocked_by_playing_session = blocked
+            self._blocked_app_id = app_id if blocked else 0
+            if blocked:
+                self._awaiting_unblock_reapply = True
+            elif previously_blocked:
+                self._awaiting_unblock_reapply = True
+                self._last_kick_attempt_at = 0.0
+            self._condition.notify_all()
+
+    def _synchronize_playing_lock(self, client: RefreshTokenSteamClient) -> bool:
+        config = self._clone_config()
+        with self._condition:
+            blocked = self._blocked_by_playing_session
+            blocked_app_id = self._blocked_app_id
+
+        if not blocked:
+            return False
+
+        message = self._build_conflict_message(config, blocked_app_id)
+        if config.conflict_policy == CONFLICT_POLICY_KICK:
+            last_error = ""
+            now = time.time()
+            if now - self._last_kick_attempt_at >= 5.0:
+                try:
+                    self._send_kick_playing_session(client)
+                    self._last_kick_attempt_at = now
+                    message = "%s Kick request sent to the blocking session." % message
+                except Exception as exc:
+                    last_error = str(exc).strip() or "Kick request failed."
+                    message = "%s Kick request failed; retrying while the session remains blocked." % message
+            else:
+                message = "%s Waiting for Steam to release the lane after the kick request." % message
+            self._set_status(
+                RuntimeState.PAUSED,
+                message,
+                active_app_ids=list(config.app_ids),
+                auth_source=self._auth_source or "refresh_token",
+                reconnect_attempts=self._reconnect_attempts,
+                connected_at=self._connected_at,
+                conflict_policy=config.conflict_policy,
+                blocked_by_playing_session=True,
+                blocked_app_id=blocked_app_id,
+                last_error=last_error,
+            )
+            client.sleep(self._sleep_interval)
+            return True
+
+        self._set_status(
+            RuntimeState.PAUSED,
+            "%s Pause policy is holding this lane until the other session ends." % message,
+            active_app_ids=list(config.app_ids),
+            auth_source=self._auth_source or "refresh_token",
+            reconnect_attempts=self._reconnect_attempts,
+            connected_at=self._connected_at,
+            conflict_policy=config.conflict_policy,
+            blocked_by_playing_session=True,
+            blocked_app_id=blocked_app_id,
+            last_error="",
+        )
+        client.sleep(self._sleep_interval)
+        return True
+
+    @staticmethod
+    def _send_kick_playing_session(client: RefreshTokenSteamClient) -> None:
+        message = MsgProto(EMsg.ClientKickPlayingSession)
+        if hasattr(message.body, "only_stop_game"):
+            message.body.only_stop_game = False
+        client.send(message)
+
+    @staticmethod
+    def _build_conflict_message(config: _LiveWorkerConfig, blocked_app_id: int) -> str:
+        app_fragment = (
+            " on app %s" % blocked_app_id
+            if blocked_app_id > 0
+            else ""
+        )
+        return "Playing session conflict detected%s for %s." % (app_fragment, config.display_name)
 
 
 class SteamNetworkBoosterRuntime:
@@ -802,6 +941,7 @@ class SteamNetworkBoosterRuntime:
             steam_id=steam_id,
             refresh_token=refresh_token,
             persona_state=account.persona_state,
+            conflict_policy=account.conflict_policy,
             custom_status=account.custom_status,
             app_ids=[int(game.app_id) for game in account.games if game.enabled],
         )
@@ -945,10 +1085,15 @@ class RuntimeController:
         status.auth_source = ""
         status.reconnect_attempts = 0
         status.connected_at = ""
+        status.blocked_by_playing_session = False
+        status.blocked_app_id = 0
         status.last_error = ""
         self._apply_ready_state(status)
         if stop_message:
-            status.message = "%s %s" % (stop_message, self._ready_message_for(status))
+            if status.state == RuntimeState.READY:
+                status.message = "%s %s" % (stop_message, self._ready_message_for(status))
+            else:
+                status.message = "%s %s" % (stop_message, status.message)
         status.updated_at = _iso_timestamp()
         self._touch_snapshot()
         self._log_event("Stopped %s." % account.display_name)
@@ -1048,6 +1193,7 @@ class RuntimeController:
         status.display_name = account.display_name
         status.login_mode = account.login_mode
         status.persona_state = account.persona_state
+        status.conflict_policy = account.conflict_policy
         status.custom_status = account.custom_status
         status.session_bundle_path = str(account.session_bundle_path or "")
         status.configured_app_ids = [int(game.app_id) for game in account.games if game.enabled]
@@ -1057,16 +1203,22 @@ class RuntimeController:
             if not status.session_ready:
                 status.state = RuntimeState.ERROR
                 status.active_app_ids = []
+                status.blocked_by_playing_session = False
+                status.blocked_app_id = 0
                 status.message = "Saved session bundle disappeared while the boost lane was active."
             elif not status.configured_app_ids:
                 status.state = RuntimeState.PAUSED
                 status.active_app_ids = []
+                status.blocked_by_playing_session = False
+                status.blocked_app_id = 0
                 status.message = "No configured slots remain for this active lane."
         else:
             status.active_app_ids = []
             status.auth_source = ""
             status.reconnect_attempts = 0
             status.connected_at = ""
+            status.blocked_by_playing_session = False
+            status.blocked_app_id = 0
             status.last_error = ""
             self._apply_ready_state(status)
 
@@ -1092,7 +1244,18 @@ class RuntimeController:
 
     def _has_valid_session_bundle(self, account: AccountProfile) -> bool:
         bundle = self._load_session_bundle(account)
-        return bool(bundle and str(bundle.get("steam_id", "")).strip())
+        if not bundle:
+            return False
+
+        steam_id = str(bundle.get("steam_id", "") or "").strip()
+        if not steam_id:
+            return False
+
+        if self._transport.preview_mode:
+            return True
+
+        refresh_token = str(bundle.get("refresh_token", "") or "").strip()
+        return bool(refresh_token and _refresh_token_is_client_usable(refresh_token))
 
     def _load_session_bundle(self, account: AccountProfile) -> Optional[Dict[str, object]]:
         if not account.session_bundle_path:
@@ -1117,6 +1280,9 @@ class RuntimeController:
             status.auth_source = telemetry.auth_source
             status.reconnect_attempts = telemetry.reconnect_attempts
             status.connected_at = telemetry.connected_at
+            status.conflict_policy = telemetry.conflict_policy or status.conflict_policy
+            status.blocked_by_playing_session = telemetry.blocked_by_playing_session
+            status.blocked_app_id = telemetry.blocked_app_id
             status.last_error = telemetry.last_error
             status.message = telemetry.message or status.message
             status.updated_at = telemetry.updated_at or _iso_timestamp()
