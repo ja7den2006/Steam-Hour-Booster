@@ -15,6 +15,7 @@ The application is being built in layers so each patch leaves the repo in a usab
 - `pywebview` for a frameless desktop host
 - custom `HTML/CSS/JS` for the branded shell
 - `SteamCommunityKit` for Steam web authentication/session flows only
+- `ValvePython/steam` for the Steam client protocol runtime
 
 ## Boundaries
 
@@ -43,7 +44,7 @@ This prevents the rest of the application from directly depending on `SteamCommu
 
 ### Runtime boundary
 
-The boost runtime is represented by internal contracts from the start, even before the live implementation exists. Later patches will plug a Steam client protocol engine into that boundary for:
+The boost runtime now sits behind internal contracts so the desktop shell stays independent from the protocol implementation. The first live engine uses `ValvePython/steam` with refresh-token client logon sourced from the saved `SteamCommunityKit` bundle for:
 
 - account session startup
 - concurrent game-slot play state
@@ -70,5 +71,5 @@ Secrets should not be written into the main config payload.
 - saved community session bundle persistence per account
 - runtime-facing account profile editing and slot-list validation
 - startup runtime readiness classification and per-account lane state
-- desktop runtime controls backed by a preview runtime controller
+- desktop runtime controls backed by a live Steam client transport
 - tests for config, auth mapping, session storage, and desktop bridge workflows

@@ -1,12 +1,37 @@
 from __future__ import annotations
 
+import base64
+import json
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Protocol
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Protocol
 
 from steam_hour_booster.models import AccountProfile
 from steam_hour_booster.session_store import SessionStore
+
+try:
+    from steam.client import SteamClient as ValvePythonSteamClient
+    from steam.core.crypto import sha1_hash
+    from steam.core.msg import MsgProto
+    from steam.enums import EOSType, EResult
+    from steam.enums.common import EPersonaState
+    from steam.enums.emsg import EMsg
+    from steam.steamid import SteamID
+    from steam.utils import ip4_to_int
+except ImportError:
+    ValvePythonSteamClient = None
+    sha1_hash = None
+    MsgProto = None
+    EOSType = None
+    EResult = None
+    EPersonaState = None
+    EMsg = None
+    SteamID = None
+    ip4_to_int = None
 
 
 class RuntimeState(str, Enum):
@@ -142,6 +167,281 @@ class PreviewBoosterRuntime:
         self._active_profiles.clear()
 
 
+def _decode_jwt_claims(token: str) -> Dict[str, object]:
+    parts = str(token or "").split(".")
+    if len(parts) < 2:
+        return {}
+    payload = parts[1]
+    padding = "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(payload + padding).decode("utf-8")
+        parsed = json.loads(decoded)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _refresh_token_is_client_usable(refresh_token: str) -> bool:
+    claims = _decode_jwt_claims(refresh_token)
+    issuer = str(claims.get("iss", "")).strip()
+    audiences = claims.get("aud") or []
+    if isinstance(audiences, str):
+        audiences = [audiences]
+    return issuer == "steam" and "client" in audiences
+
+
+if ValvePythonSteamClient is not None:
+    class RefreshTokenSteamClient(ValvePythonSteamClient):
+        def login_with_refresh_token(
+            self,
+            refresh_token: str,
+            steam_id: str,
+            *,
+            account_name: str = "",
+            login_id: Optional[int] = None,
+        ):
+            if not str(refresh_token or "").strip():
+                raise ValueError("refresh_token is required")
+            if not str(steam_id or "").strip():
+                raise ValueError("steam_id is required")
+
+            eresult = self._pre_login()
+            if eresult != EResult.OK:
+                return eresult
+
+            self.username = account_name or str(steam_id)
+
+            message = MsgProto(EMsg.ClientLogon)
+            message.header.steamid = SteamID(int(steam_id))
+            message.body.protocol_version = 65580
+            message.body.client_package_version = 1561159470
+            message.body.client_os_type = EOSType.Windows10
+            message.body.client_language = "english"
+            message.body.should_remember_password = True
+            message.body.supports_rate_limit_response = True
+            message.body.chat_mode = self.chat_mode
+
+            if login_id is None:
+                message.body.obfuscated_private_ip.v4 = (
+                    ip4_to_int(self.connection.local_address) ^ 0xF00DBAAD
+                )
+            else:
+                message.body.obfuscated_private_ip.v4 = int(login_id)
+
+            if account_name:
+                message.body.account_name = str(account_name)
+
+            sentry = self.get_sentry(self.username)
+            if sentry is None:
+                message.body.eresult_sentryfile = EResult.FileNotFound
+            else:
+                message.body.eresult_sentryfile = EResult.OK
+                message.body.sha_sentryfile = sha1_hash(sentry)
+
+            message.body.access_token = str(refresh_token)
+            self.send(message)
+
+            resp = self.wait_msg(EMsg.ClientLogOnResponse, timeout=30)
+            if resp and resp.body.eresult == EResult.OK:
+                self.sleep(0.5)
+            return EResult(resp.body.eresult) if resp else EResult.Fail
+else:
+    RefreshTokenSteamClient = None
+
+
+@dataclass
+class _LiveWorkerConfig:
+    profile_id: str
+    display_name: str
+    account_name: str
+    steam_id: str
+    refresh_token: str
+    persona_state: str
+    custom_status: str
+    app_ids: List[int]
+
+
+class _LiveBoostWorker:
+    def __init__(
+        self,
+        *,
+        config: _LiveWorkerConfig,
+        client_factory: Callable[[], RefreshTokenSteamClient],
+        credential_dir: Path,
+        sleep_interval: float = 1.0,
+    ) -> None:
+        self._config = config
+        self._client_factory = client_factory
+        self._credential_dir = credential_dir
+        self._sleep_interval = max(0.2, float(sleep_interval))
+        self._client = None
+        self._thread = None
+        self._stop_event = threading.Event()
+        self._started_event = threading.Event()
+        self._stopped_event = threading.Event()
+        self._active_app_ids: List[int] = []
+        self._message = "Boost lane not started."
+        self._error_message = ""
+
+    @property
+    def active_app_ids(self) -> List[int]:
+        return list(self._active_app_ids)
+
+    def start_and_wait(self, timeout: float) -> RuntimeStartResult:
+        if self._thread is not None:
+            raise RuntimeError("Boost worker already started.")
+
+        self._thread = threading.Thread(
+            target=self._run,
+            name="steam-hour-booster-%s" % self._config.profile_id,
+            daemon=True,
+        )
+        self._thread.start()
+
+        if not self._started_event.wait(max(timeout, 1.0)):
+            self.stop_and_wait(timeout=5.0)
+            raise RuntimeError("Timed out waiting for the Steam client session to start.")
+
+        if self._error_message:
+            raise RuntimeError(self._error_message)
+
+        return RuntimeStartResult(
+            active_app_ids=self.active_app_ids,
+            message=self._message,
+        )
+
+    def stop_and_wait(self, timeout: float = 10.0) -> str:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(max(timeout, 0.5))
+        return self._message or "Boost lane stopped."
+
+    def _run(self) -> None:
+        try:
+            self._credential_dir.mkdir(parents=True, exist_ok=True)
+            client = self._client_factory()
+            self._client = client
+            client.set_credential_location(str(self._credential_dir))
+
+            result = client.login_with_refresh_token(
+                self._config.refresh_token,
+                self._config.steam_id,
+                account_name=self._config.account_name,
+            )
+            if result != EResult.OK:
+                self._error_message = "Steam client logon failed: %s." % getattr(result, "name", result)
+                self._message = self._error_message
+                return
+
+            persona_state = getattr(EPersonaState, self._config.persona_state, None)
+            if persona_state is not None:
+                client.change_status(persona_state=persona_state)
+            client.games_played(list(self._config.app_ids))
+            self._active_app_ids = list(self._config.app_ids)
+            self._message = (
+                "Steam client lane active with %s slot%s."
+                % (len(self._active_app_ids), "" if len(self._active_app_ids) == 1 else "s")
+            )
+            self._started_event.set()
+
+            while not self._stop_event.is_set():
+                if not client.connected or not client.logged_on:
+                    self._error_message = "Steam client session disconnected."
+                    self._message = self._error_message
+                    return
+                client.sleep(self._sleep_interval)
+        except Exception as exc:
+            self._error_message = str(exc).strip() or "Unexpected Steam client runtime failure."
+            self._message = self._error_message
+        finally:
+            if not self._started_event.is_set():
+                self._started_event.set()
+            try:
+                if self._client is not None:
+                    if self._client.logged_on:
+                        self._client.logout()
+                    elif self._client.connected:
+                        self._client.disconnect()
+            except Exception:
+                pass
+            self._active_app_ids = []
+            self._stopped_event.set()
+
+
+class SteamNetworkBoosterRuntime:
+    name = "valvepython-steam"
+    preview_mode = False
+
+    def __init__(
+        self,
+        *,
+        session_store: SessionStore,
+        client_factory: Optional[Callable[[], RefreshTokenSteamClient]] = None,
+        start_timeout: float = 20.0,
+        sleep_interval: float = 1.0,
+    ) -> None:
+        if RefreshTokenSteamClient is None:
+            raise RuntimeError("The steam client protocol package is not installed.")
+        self._session_store = session_store
+        self._client_factory = client_factory or RefreshTokenSteamClient
+        self._start_timeout = max(5.0, float(start_timeout))
+        self._sleep_interval = max(0.2, float(sleep_interval))
+        self._workers: Dict[str, _LiveBoostWorker] = {}
+        self._credential_root = Path(self._session_store.base_dir) / "cm_credentials"
+
+    def start(self, account: AccountProfile, session_bundle: Dict[str, object]) -> RuntimeStartResult:
+        refresh_token = str(session_bundle.get("refresh_token", "") or "").strip()
+        steam_id = str(session_bundle.get("steam_id", "") or account.steam_id or "").strip()
+        if not refresh_token:
+            raise RuntimeError("Saved session bundle does not contain a Steam refresh token.")
+        if not steam_id:
+            raise RuntimeError("Saved session bundle does not include a SteamID.")
+        if not _refresh_token_is_client_usable(refresh_token):
+            raise RuntimeError("The saved refresh token is not valid for Steam client logon.")
+
+        if account.profile_id in self._workers:
+            self.stop(account.profile_id)
+
+        worker = _LiveBoostWorker(
+            config=_LiveWorkerConfig(
+                profile_id=account.profile_id,
+                display_name=account.display_name,
+                account_name=account.account_name,
+                steam_id=steam_id,
+                refresh_token=refresh_token,
+                persona_state=account.persona_state,
+                custom_status=account.custom_status,
+                app_ids=[int(game.app_id) for game in account.games if game.enabled],
+            ),
+            client_factory=self._client_factory,
+            credential_dir=self._credential_root / account.profile_id,
+            sleep_interval=self._sleep_interval,
+        )
+        self._workers[account.profile_id] = worker
+        try:
+            return worker.start_and_wait(timeout=self._start_timeout)
+        except Exception:
+            self._workers.pop(account.profile_id, None)
+            raise
+
+    def stop(self, profile_id: str) -> str:
+        worker = self._workers.pop(profile_id, None)
+        if worker is None:
+            return "Boost lane was not running."
+        message = worker.stop_and_wait(timeout=8.0)
+        return message if message else "Boost lane stopped."
+
+    def shutdown(self) -> None:
+        for profile_id in list(self._workers.keys()):
+            self.stop(profile_id)
+
+
+def build_default_transport(session_store: SessionStore) -> BoosterRuntime:
+    if RefreshTokenSteamClient is not None:
+        return SteamNetworkBoosterRuntime(session_store=session_store)
+    return PreviewBoosterRuntime()
+
+
 class RuntimeController:
     def __init__(
         self,
@@ -151,7 +451,7 @@ class RuntimeController:
         event_limit: int = 60,
     ) -> None:
         self._session_store = session_store or SessionStore()
-        self._transport = transport or PreviewBoosterRuntime()
+        self._transport = transport or build_default_transport(self._session_store)
         self._event_limit = max(10, int(event_limit))
         self._snapshot = RuntimeSnapshot(
             transport_name=self._transport.name,

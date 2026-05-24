@@ -35,6 +35,7 @@ classifiers = [
 ]
 dependencies = [
   "pywebview>=6.2,<7",
+  "steam[client]>=1.4.4,<2",
   "steamcommunitykit @ git+https://github.com/ja7den2006/SteamCommunityKit.git",
 ]
 

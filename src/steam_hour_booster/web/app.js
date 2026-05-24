@@ -26,8 +26,8 @@ const fallbackState = {
     slot_ceiling: 32,
     conflict_policy: 'Pause before force-kick',
     reconnect_posture: 'Backoff and resume',
-    transport_name: 'local-preview',
-    preview_mode: true,
+    transport_name: 'valvepython-steam',
+    preview_mode: false,
     counts: {
       tracked_accounts: 0,
       ready_accounts: 0,
@@ -37,8 +37,9 @@ const fallbackState = {
     },
     statuses: [],
     recent_events: [
-      '[foundation] runtime controller initialized',
-      '[next] attach the live Steam client transport',
+      '[runtime] runtime controller initialized',
+      '[runtime] Steam client transport available',
+      '[next] harden reconnect and live slot updates',
     ],
   },
 };
@@ -383,8 +384,9 @@ function fillRuntime() {
     const lines = runtime.recent_events && runtime.recent_events.length
       ? runtime.recent_events
       : [
-          '[foundation] runtime controller initialized',
-          '[next] attach the live Steam client transport',
+          '[runtime] runtime controller initialized',
+          '[runtime] Steam client transport available',
+          '[next] harden reconnect and live slot updates',
         ];
     log.textContent = lines.join('\n');
   }

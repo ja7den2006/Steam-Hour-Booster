@@ -4,6 +4,7 @@ from pathlib import Path
 from steam_hour_booster.auth.community import AuthSession
 from steam_hour_booster.config_store import ConfigStore
 from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
+from steam_hour_booster.runtime import PreviewBoosterRuntime, RuntimeController
 from steam_hour_booster.session_store import SessionStore
 from steam_hour_booster.web.bridge import DesktopApi
 
@@ -101,6 +102,13 @@ class FakeAuthGateway:
             session_bundle={"steam_id": "7656121", "refresh_token": "qr-refresh"},
             session_state={"logged_in": True},
         )
+
+
+def preview_runtime_controller(session_store: SessionStore) -> RuntimeController:
+    return RuntimeController(
+        session_store=session_store,
+        transport=PreviewBoosterRuntime(),
+    )
 
 
 def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
@@ -318,6 +326,7 @@ def test_runtime_controls_start_and_stop_lanes(tmp_path) -> None:
         config=config,
         auth_gateway=FakeAuthGateway(),
         session_store=session_store,
+        runtime_controller=preview_runtime_controller(session_store),
     )
 
     started = api.start_account_runtime("steam_7656119")
@@ -357,6 +366,6 @@ def test_runtime_refresh_exposes_transport_status(tmp_path) -> None:
 
     assert result["ok"] is True
     runtime_state = result["state"]["runtime"]
-    assert runtime_state["transport_name"] == "local-preview"
-    assert runtime_state["preview_mode"] is True
+    assert runtime_state["transport_name"] == "valvepython-steam"
+    assert runtime_state["preview_mode"] is False
     assert runtime_state["counts"]["ready_accounts"] == 1

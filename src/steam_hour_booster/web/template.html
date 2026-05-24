@@ -132,8 +132,8 @@ __INLINE_STYLES__
                 <h3>Runtime path</h3>
                 <p>The boost engine will sit behind explicit runtime contracts instead of leaking directly into presentation code.</p>
                 <div class="meta-list">
-                  <div><span>Current state</span><strong>Controller + preview transport</strong></div>
-                  <div><span>Next focus</span><strong>Steam client transport</strong></div>
+                  <div><span>Current state</span><strong>Controller + live client transport</strong></div>
+                  <div><span>Next focus</span><strong>Reconnect and slot-update hardening</strong></div>
                   <div><span>Conflict policy</span><strong>Pause first</strong></div>
                   <div><span>Reconnect posture</span><strong>Backoff + resume</strong></div>
                 </div>
@@ -415,10 +415,10 @@ __INLINE_STYLES__
                   <div class="eyebrow">RUNTIME CONTROL</div>
                   <h3>Session-backed lane orchestration</h3>
                 </div>
-                <span class="pill pill--subtle" id="runtime-mode-pill">Preview transport</span>
+                <span class="pill pill--subtle" id="runtime-mode-pill">Steam client transport</span>
               </div>
               <p class="card-copy">
-                Saved session bundles are resolved at startup and each account is classified before a boost lane can start. This patch adds the runtime controller and lane management surface before the live Steam client transport is attached.
+                Saved session bundles are resolved at startup and each account is classified before a boost lane can start. The runtime controller now hands ready accounts into the live Steam client transport while keeping the shell independent from protocol logic.
               </p>
 
               <div class="status-banner status-banner--hidden" id="runtime-status"></div>
@@ -466,8 +466,9 @@ __INLINE_STYLES__
             <article class="card card--log">
               <div class="eyebrow">ACTIVITY CONSOLE</div>
               <h3>Runtime controller log</h3>
-              <pre id="runtime-log">[foundation] runtime controller initialized
-[next] attach the live Steam client transport</pre>
+              <pre id="runtime-log">[runtime] runtime controller initialized
+[runtime] Steam client transport available
+[next] harden reconnect and live slot updates</pre>
             </article>
           </section>
 
