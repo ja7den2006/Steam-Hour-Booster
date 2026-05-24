@@ -27,6 +27,7 @@ The desktop layer owns:
 - local config editing and runtime visibility
 
 The shell is hosted in `pywebview` so the product can use a fully custom front-end surface without depending on the broken local Qt native bindings in the current Python 3.8 environment. It should remain independent from the live Steam runtime so it stays testable and can be iterated without touching protocol logic.
+Because the UI itself is web-based, the shell can still be moved to a different desktop host such as `Go + Wails` later without throwing away the front-end layer.
 
 ### Authentication gateway
 
@@ -68,4 +69,6 @@ Secrets should not be written into the main config payload.
 - credential, refresh-token, and QR onboarding bridge methods
 - saved community session bundle persistence per account
 - runtime-facing account profile editing and slot-list validation
+- startup runtime readiness classification and per-account lane state
+- desktop runtime controls backed by a preview runtime controller
 - tests for config, auth mapping, session storage, and desktop bridge workflows

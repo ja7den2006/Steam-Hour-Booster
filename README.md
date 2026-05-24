@@ -34,6 +34,13 @@ The current repository state covers the first two product layers before the live
   - slot list up to 32 app IDs
   - operator notes
   - session bundle metadata visibility
+- startup runtime readiness classification from saved session bundles
+- runtime lane controls through the desktop shell:
+  - refresh readiness
+  - start a single ready lane
+  - stop a running lane
+  - start or stop all lanes
+- a preview runtime controller with activity logging, ready/boosting/error counts, and per-account lane status cards
 - test coverage for config, auth mapping, session storage, and desktop bridge behavior
 
 The actual Steam CM boosting loop and multi-slot runtime will land in later patches on top of this foundation.
@@ -56,6 +63,7 @@ pytest -q
 - Python `3.8+` is supported.
 - `SteamCommunityKit` is used only for authentication/session workflows in this app.
 - The desktop shell is delivered as a custom HTML/CSS/JS surface inside a local `pywebview` host so it remains compatible with the current Python `3.8` environment.
+- The shell remains portable because the UI surface is web-based, so moving the host to a Go/Wails shell later is still possible without throwing away the front-end work.
 - Account session bundles are stored under local app data instead of being embedded in the main config payload.
 
 ## Repository Intent

@@ -15,7 +15,7 @@ authors = [
 keywords = [
   "steam",
   "desktop",
-  "pyside6",
+  "pywebview",
   "steamcommunitykit",
   "hour-booster",
 ]

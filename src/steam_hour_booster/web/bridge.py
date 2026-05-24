@@ -16,6 +16,7 @@ from steam_hour_booster.auth.community import AuthSession, PendingQRLogin, Steam
 from steam_hour_booster.config_store import ConfigStore
 from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
 from steam_hour_booster.paths import config_path, logs_dir, sessions_dir
+from steam_hour_booster.runtime import RuntimeController, RuntimeState
 from steam_hour_booster.session_store import SessionStore
 
 
@@ -48,14 +49,19 @@ class DesktopApi:
         config: AppConfig,
         auth_gateway: Optional[SteamCommunityAuthGateway] = None,
         session_store: Optional[SessionStore] = None,
+        runtime_controller: Optional[RuntimeController] = None,
     ) -> None:
         self._config_store = config_store
         self._config = config
         self._auth_gateway = auth_gateway or SteamCommunityAuthGateway()
         self._session_store = session_store or SessionStore()
+        self._runtime_controller = runtime_controller or RuntimeController(
+            session_store=self._session_store
+        )
         self._window = None
         self._maximized = False
         self._pending_qr_logins: Dict[str, PendingQRLoginRecord] = {}
+        self._sync_runtime_profiles()
 
     @property
     def config(self) -> AppConfig:
@@ -66,6 +72,7 @@ class DesktopApi:
         self._register_window_events()
 
     def get_bootstrap_state(self) -> Dict[str, Any]:
+        runtime_snapshot = self._runtime_controller.snapshot().to_dict()
         return {
             "theme": self._config.theme,
             "last_page": self._config.last_page,
@@ -94,6 +101,7 @@ class DesktopApi:
                 "slot_ceiling": 32,
                 "conflict_policy": "Pause before force-kick",
                 "reconnect_posture": "Backoff and resume",
+                **runtime_snapshot,
             },
             "onboarding": {
                 "pending_qr_login_count": len(self._pending_qr_logins),
@@ -246,6 +254,7 @@ class DesktopApi:
                 self._session_store.delete_bundle(account.profile_id)
             self._config.accounts.pop(index)
             self._persist()
+            self._sync_runtime_profiles()
             return {
                 "ok": True,
                 "status": "removed",
@@ -302,6 +311,7 @@ class DesktopApi:
 
             self._config.accounts.sort(key=lambda item: item.display_name.lower())
             self._persist()
+            self._sync_runtime_profiles()
             return {
                 "ok": True,
                 "status": "saved",
@@ -311,6 +321,81 @@ class DesktopApi:
             }
         except Exception as exc:
             return self._error_result(exc)
+
+    def refresh_runtime_state(self) -> Dict[str, Any]:
+        self._sync_runtime_profiles(reason="manual refresh")
+        return {
+            "ok": True,
+            "status": "refreshed",
+            "message": "Runtime readiness refreshed.",
+            "state": self.get_bootstrap_state(),
+        }
+
+    def start_account_runtime(self, profile_id: str) -> Dict[str, Any]:
+        resolved_profile_id = self._normalize_required_string(profile_id, "profile id")
+        try:
+            status = self._runtime_controller.start_profile(
+                resolved_profile_id,
+                self._config.accounts,
+            )
+        except KeyError as exc:
+            return self._message_result(
+                ok=False,
+                status="not_found",
+                message=str(exc).strip("'"),
+            )
+
+        ok = status.state == RuntimeState.BOOSTING
+        return {
+            "ok": ok,
+            "status": "started" if ok else "blocked",
+            "message": "Boost lane started for %s." % status.display_name if ok else status.message,
+            "state": self.get_bootstrap_state(),
+        }
+
+    def stop_account_runtime(self, profile_id: str) -> Dict[str, Any]:
+        resolved_profile_id = self._normalize_required_string(profile_id, "profile id")
+        try:
+            status = self._runtime_controller.stop_profile(
+                resolved_profile_id,
+                self._config.accounts,
+            )
+        except KeyError as exc:
+            return self._message_result(
+                ok=False,
+                status="not_found",
+                message=str(exc).strip("'"),
+            )
+
+        ok = status.state in (RuntimeState.IDLE, RuntimeState.READY, RuntimeState.ERROR)
+        return {
+            "ok": ok,
+            "status": "stopped" if ok else "blocked",
+            "message": "Boost lane stopped for %s." % status.display_name if ok else status.message,
+            "state": self.get_bootstrap_state(),
+        }
+
+    def start_all_runtime(self) -> Dict[str, Any]:
+        summary = self._runtime_controller.start_all(self._config.accounts)
+        return {
+            "ok": True,
+            "status": "started",
+            "message": "Runtime start sweep finished. Started %s, skipped %s, failed %s."
+            % (summary["started"], summary["skipped"], summary["failed"]),
+            "summary": summary,
+            "state": self.get_bootstrap_state(),
+        }
+
+    def stop_all_runtime(self) -> Dict[str, Any]:
+        summary = self._runtime_controller.stop_all(self._config.accounts)
+        return {
+            "ok": True,
+            "status": "stopped",
+            "message": "Stopped %s boost lane%s."
+            % (summary["stopped"], "" if summary["stopped"] == 1 else "s"),
+            "summary": summary,
+            "state": self.get_bootstrap_state(),
+        }
 
     def minimize_window(self) -> Dict[str, Any]:
         if self._window is not None:
@@ -332,6 +417,7 @@ class DesktopApi:
 
     def close_window(self) -> Dict[str, Any]:
         self._persist_window_state()
+        self._runtime_controller.shutdown(self._config.accounts)
         if self._window is not None:
             self._window.destroy()
         return {"ok": True}
@@ -359,6 +445,9 @@ class DesktopApi:
 
     def _persist(self) -> None:
         self._config_store.save(self._config)
+
+    def _sync_runtime_profiles(self, *, reason: str = "") -> None:
+        self._runtime_controller.refresh_accounts(self._config.accounts, reason=reason)
 
     def _upsert_authenticated_account(
         self,
@@ -411,6 +500,7 @@ class DesktopApi:
 
         self._config.accounts.sort(key=lambda account: account.display_name.lower())
         self._persist()
+        self._sync_runtime_profiles()
 
         return {
             "ok": True,

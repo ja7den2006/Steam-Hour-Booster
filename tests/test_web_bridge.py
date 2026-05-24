@@ -294,3 +294,69 @@ def test_save_account_profile_rejects_too_many_slots(tmp_path) -> None:
 
     assert result["ok"] is False
     assert "32 game slots" in result["message"]
+
+
+def test_runtime_controls_start_and_stop_lanes(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                account_name="primary_account",
+                steam_id="7656119",
+                login_mode="credentials",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    started = api.start_account_runtime("steam_7656119")
+    stopped = api.stop_account_runtime("steam_7656119")
+
+    assert started["ok"] is True
+    assert started["state"]["runtime"]["counts"]["boosting_accounts"] == 1
+    assert stopped["ok"] is True
+    assert stopped["state"]["runtime"]["counts"]["boosting_accounts"] == 0
+    runtime_status = stopped["state"]["runtime"]["statuses"][0]
+    assert runtime_status["state"] == "ready"
+
+
+def test_runtime_refresh_exposes_transport_status(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                steam_id="7656119",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.refresh_runtime_state()
+
+    assert result["ok"] is True
+    runtime_state = result["state"]["runtime"]
+    assert runtime_state["transport_name"] == "local-preview"
+    assert runtime_state["preview_mode"] is True
+    assert runtime_state["counts"]["ready_accounts"] == 1

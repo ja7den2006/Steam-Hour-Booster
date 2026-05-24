@@ -26,6 +26,20 @@ const fallbackState = {
     slot_ceiling: 32,
     conflict_policy: 'Pause before force-kick',
     reconnect_posture: 'Backoff and resume',
+    transport_name: 'local-preview',
+    preview_mode: true,
+    counts: {
+      tracked_accounts: 0,
+      ready_accounts: 0,
+      boosting_accounts: 0,
+      error_accounts: 0,
+      active_slots: 0,
+    },
+    statuses: [],
+    recent_events: [
+      '[foundation] runtime controller initialized',
+      '[next] attach the live Steam client transport',
+    ],
   },
 };
 
@@ -45,6 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindDragRegion();
   bindAuthModes();
   bindAccountActions();
+  bindRuntimeActions();
   await waitForBridge();
   await hydrate();
   window.setTimeout(() => document.body.classList.add('is-ready'), 10);
@@ -186,6 +201,44 @@ function bindAccountActions() {
   }
 }
 
+function bindRuntimeActions() {
+  const list = document.getElementById('runtime-account-list');
+  if (list) {
+    list.addEventListener('click', async (event) => {
+      const target = event.target.closest('[data-runtime-action]');
+      if (!target?.dataset.profileId) {
+        return;
+      }
+      const action = target.dataset.runtimeAction;
+      target.disabled = true;
+      try {
+        if (action === 'start') {
+          await startRuntimeLane(target.dataset.profileId);
+        } else if (action === 'stop') {
+          await stopRuntimeLane(target.dataset.profileId);
+        }
+      } finally {
+        target.disabled = false;
+      }
+    });
+  }
+
+  const refreshButton = document.getElementById('runtime-refresh-button');
+  if (refreshButton) {
+    refreshButton.addEventListener('click', refreshRuntimeReadiness);
+  }
+
+  const startAllButton = document.getElementById('runtime-start-all-button');
+  if (startAllButton) {
+    startAllButton.addEventListener('click', startAllRuntimeLanes);
+  }
+
+  const stopAllButton = document.getElementById('runtime-stop-all-button');
+  if (stopAllButton) {
+    stopAllButton.addEventListener('click', stopAllRuntimeLanes);
+  }
+}
+
 async function selectPage(pageKey, persist) {
   shellState.currentPage = pageKey;
 
@@ -317,6 +370,74 @@ function fillRuntime() {
   setText('runtime-slot-ceiling', `${runtime.slot_ceiling} app IDs`);
   setText('runtime-conflict-policy', runtime.conflict_policy);
   setText('runtime-reconnect-posture', runtime.reconnect_posture);
+  setText('runtime-ready-count', String(runtime.counts?.ready_accounts || 0));
+  setText('runtime-boosting-count', String(runtime.counts?.boosting_accounts || 0));
+  setText('runtime-active-slot-count', String(runtime.counts?.active_slots || 0));
+  setText('runtime-transport-name', runtime.transport_name || 'Unknown');
+  setText('runtime-accounts-pill', `${runtime.counts?.tracked_accounts || 0} tracked`);
+  setText('runtime-mode-pill', runtime.preview_mode ? 'Preview transport' : 'Live transport');
+  fillRuntimeAccounts(runtime.statuses || []);
+
+  const log = document.getElementById('runtime-log');
+  if (log) {
+    const lines = runtime.recent_events && runtime.recent_events.length
+      ? runtime.recent_events
+      : [
+          '[foundation] runtime controller initialized',
+          '[next] attach the live Steam client transport',
+        ];
+    log.textContent = lines.join('\n');
+  }
+}
+
+function fillRuntimeAccounts(statuses) {
+  const list = document.getElementById('runtime-account-list');
+  if (!list) {
+    return;
+  }
+  list.innerHTML = '';
+
+  if (!statuses.length) {
+    const empty = document.createElement('div');
+    empty.className = 'runtime-account runtime-account--empty';
+    empty.textContent = 'No runtime-tracked accounts yet. Add an account and save at least one session bundle first.';
+    list.appendChild(empty);
+    return;
+  }
+
+  statuses.forEach((status) => {
+    const item = document.createElement('div');
+    item.className = 'runtime-account';
+    item.innerHTML = `
+      <div class="runtime-account__header">
+        <div>
+          <div class="runtime-account__title">${escapeHtml(status.display_name)}</div>
+          <div class="runtime-account__subtitle">${escapeHtml(status.login_mode || 'unknown')} • ${escapeHtml(status.persona_state || 'Online')}</div>
+        </div>
+        <div class="runtime-account__actions">
+          <span class="runtime-state runtime-state--${escapeHtml(status.state)}">${escapeHtml(status.state_label || status.state)}</span>
+          <button class="ghost-button" data-runtime-action="start" data-profile-id="${escapeHtml(status.profile_id)}" ${status.can_start ? '' : 'disabled'}>Start</button>
+          <button class="ghost-button" data-runtime-action="stop" data-profile-id="${escapeHtml(status.profile_id)}" ${status.can_stop ? '' : 'disabled'}>Stop</button>
+        </div>
+      </div>
+      <div class="runtime-account__meta">
+        <div>
+          <span>Configured</span>
+          <strong>${status.configured_slot_count}</strong>
+        </div>
+        <div>
+          <span>Active</span>
+          <strong>${status.active_slot_count}</strong>
+        </div>
+        <div>
+          <span>Session</span>
+          <strong>${status.session_ready ? 'Ready' : 'Missing'}</strong>
+        </div>
+      </div>
+      <div class="runtime-account__message">${escapeHtml(status.message || 'No runtime message available.')}</div>
+    `;
+    list.appendChild(item);
+  });
 }
 
 function fillSettings() {
@@ -341,7 +462,12 @@ function updateTopbarPill() {
   if (!pill) {
     return;
   }
+  const boosting = shellState.bootstrap.runtime?.counts?.boosting_accounts || 0;
   const accounts = shellState.bootstrap.counts.accounts;
+  if (boosting > 0) {
+    pill.textContent = `${boosting} lane${boosting === 1 ? '' : 's'} active`;
+    return;
+  }
   pill.textContent = accounts > 0 ? `${accounts} account${accounts === 1 ? '' : 's'} ready` : 'Onboarding enabled';
 }
 
@@ -522,6 +648,8 @@ async function handleMutationResult(result, options = {}) {
   if (!result?.ok) {
     if (options.target === 'editor') {
       setEditorStatus('error', result?.message || 'The request failed.');
+    } else if (options.target === 'runtime') {
+      setRuntimeStatus('error', result?.message || 'The request failed.');
     } else {
       setAuthStatus('error', result?.message || 'The request failed.');
     }
@@ -543,6 +671,8 @@ async function handleMutationResult(result, options = {}) {
 
   if (options.target === 'editor') {
     setEditorStatus('success', options.successMessage || result.message || 'Saved.');
+  } else if (options.target === 'runtime') {
+    setRuntimeStatus('success', options.successMessage || result.message || 'Saved.');
   } else {
     setAuthStatus('success', options.successMessage || result.message || 'Saved.');
   }
@@ -563,6 +693,18 @@ function setAuthStatus(kind, message) {
 
 function setEditorStatus(kind, message) {
   const banner = document.getElementById('account-editor-status');
+  if (!banner) {
+    return;
+  }
+  banner.textContent = message || '';
+  banner.className = `status-banner status-banner--${kind}`;
+  if (!message) {
+    banner.classList.add('status-banner--hidden');
+  }
+}
+
+function setRuntimeStatus(kind, message) {
+  const banner = document.getElementById('runtime-status');
   if (!banner) {
     return;
   }
@@ -655,6 +797,57 @@ async function saveAccountProfile() {
     selectProfileId: profile.profile_id,
   });
   setButtonBusy('account-save-button', false, 'Save Account Settings');
+}
+
+async function refreshRuntimeReadiness() {
+  setButtonBusy('runtime-refresh-button', true, 'Refreshing...');
+  setRuntimeStatus('info', 'Refreshing runtime readiness from saved account state.');
+  const result = await callApi('refresh_runtime_state');
+  await handleMutationResult(result, {
+    target: 'runtime',
+    successMessage: result?.message || 'Runtime readiness refreshed.',
+  });
+  setButtonBusy('runtime-refresh-button', false, 'Refresh Readiness');
+}
+
+async function startAllRuntimeLanes() {
+  setButtonBusy('runtime-start-all-button', true, 'Starting...');
+  setRuntimeStatus('info', 'Starting every ready boost lane.');
+  const result = await callApi('start_all_runtime');
+  await handleMutationResult(result, {
+    target: 'runtime',
+    successMessage: result?.message || 'Runtime start sweep finished.',
+  });
+  setButtonBusy('runtime-start-all-button', false, 'Start Ready Lanes');
+}
+
+async function stopAllRuntimeLanes() {
+  setButtonBusy('runtime-stop-all-button', true, 'Stopping...');
+  setRuntimeStatus('info', 'Stopping all active boost lanes.');
+  const result = await callApi('stop_all_runtime');
+  await handleMutationResult(result, {
+    target: 'runtime',
+    successMessage: result?.message || 'All runtime lanes stopped.',
+  });
+  setButtonBusy('runtime-stop-all-button', false, 'Stop All Lanes');
+}
+
+async function startRuntimeLane(profileId) {
+  setRuntimeStatus('info', 'Starting boost lane.');
+  const result = await callApi('start_account_runtime', profileId);
+  await handleMutationResult(result, {
+    target: 'runtime',
+    successMessage: result?.message || 'Boost lane started.',
+  });
+}
+
+async function stopRuntimeLane(profileId) {
+  setRuntimeStatus('info', 'Stopping boost lane.');
+  const result = await callApi('stop_account_runtime', profileId);
+  await handleMutationResult(result, {
+    target: 'runtime',
+    successMessage: result?.message || 'Boost lane stopped.',
+  });
 }
 
 async function callApi(methodName, ...args) {

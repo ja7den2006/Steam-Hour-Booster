@@ -17,7 +17,7 @@ __INLINE_STYLES__
             <div class="brand-copy__title">Steam Hour Booster</div>
             <div class="brand-copy__subtitle">Desktop control surface</div>
           </div>
-          <div class="topbar-pill" id="topbar-pill">Foundation build</div>
+          <div class="topbar-pill" id="topbar-pill">Runtime controller online</div>
         </div>
         <div class="topbar__actions">
           <button class="window-button" data-action="minimize">_</button>
@@ -32,9 +32,9 @@ __INLINE_STYLES__
             <div class="sidebar__eyebrow">CONTROL SURFACE</div>
             <h1>Professional shell first.</h1>
             <p>
-              The first pushed patch focuses on the branded desktop shell,
-              configuration boundaries, and auth/runtime architecture instead of
-              shipping a throwaway script UI.
+              The product now has a branded desktop shell, account onboarding,
+              runtime profile editing, and a session-backed runtime controller
+              instead of a throwaway script UI.
             </p>
           </div>
 
@@ -60,9 +60,9 @@ __INLINE_STYLES__
           <section class="sidebar-card">
             <div class="sidebar-card__title">Patch status</div>
             <p>
-              This patch is not meant to be the final product. It establishes a
-              real host shell, the auth boundary, and the repo hygiene needed for
-              the live runtime work that follows.
+              Each patch is meant to leave the repo in a better operational
+              state. The current build already covers the real host shell,
+              auth boundary, account management, and runtime control surface.
             </p>
           </section>
         </aside>
@@ -71,12 +71,13 @@ __INLINE_STYLES__
           <section class="page is-active" data-page="dashboard">
             <section class="hero card reveal">
               <div class="hero__copy">
-                <div class="eyebrow">FOUNDATION PATCH</div>
-                <h2>A custom desktop shell for a real Steam hour boosting tool.</h2>
+                <div class="eyebrow">CURRENT PRODUCT SLICE</div>
+                <h2>A custom desktop shell with real account onboarding and runtime control.</h2>
                 <p>
                   This build path is centered on durable account handling,
-                  professional presentation, and room for a later multi-slot
-                  runtime instead of a rushed one-shot UI.
+                  professional presentation, durable session handling, and a
+                  runtime surface that is ready for the live multi-slot Steam
+                  client transport.
                 </p>
                 <div class="hero__pills">
                   <span class="pill">Credential login</span>
@@ -112,7 +113,7 @@ __INLINE_STYLES__
               <article class="card stat-card">
                 <span class="stat-card__label">Configured slots</span>
                 <strong class="stat-card__value" id="configured-slot-count">0</strong>
-                <p>The shell already tracks per-account game targets in config, even before the live runtime lands.</p>
+                <p>The shell now tracks per-account game targets in config and uses them in the runtime controller.</p>
               </article>
             </section>
 
@@ -131,7 +132,7 @@ __INLINE_STYLES__
                 <h3>Runtime path</h3>
                 <p>The boost engine will sit behind explicit runtime contracts instead of leaking directly into presentation code.</p>
                 <div class="meta-list">
-                  <div><span>Current state</span><strong>Contracts only</strong></div>
+                  <div><span>Current state</span><strong>Controller + preview transport</strong></div>
                   <div><span>Next focus</span><strong>Steam client transport</strong></div>
                   <div><span>Conflict policy</span><strong>Pause first</strong></div>
                   <div><span>Reconnect posture</span><strong>Backoff + resume</strong></div>
@@ -286,7 +287,7 @@ __INLINE_STYLES__
                   <li>Real account onboarding through the desktop shell.</li>
                   <li>Per-account session bundle persistence under local app data.</li>
                   <li>QR login approval flow without terminal prompts.</li>
-                  <li>A clean handoff into the future Steam client boosting runtime.</li>
+                  <li>A clean handoff into the live Steam client boosting runtime.</li>
                 </ul>
               </article>
             </section>
@@ -408,12 +409,65 @@ __INLINE_STYLES__
               </article>
             </section>
 
+            <article class="card runtime-control-card">
+              <div class="card-header">
+                <div>
+                  <div class="eyebrow">RUNTIME CONTROL</div>
+                  <h3>Session-backed lane orchestration</h3>
+                </div>
+                <span class="pill pill--subtle" id="runtime-mode-pill">Preview transport</span>
+              </div>
+              <p class="card-copy">
+                Saved session bundles are resolved at startup and each account is classified before a boost lane can start. This patch adds the runtime controller and lane management surface before the live Steam client transport is attached.
+              </p>
+
+              <div class="status-banner status-banner--hidden" id="runtime-status"></div>
+
+              <div class="form-actions runtime-actions">
+                <button class="action-button" id="runtime-start-all-button">Start Ready Lanes</button>
+                <button class="secondary-button" id="runtime-stop-all-button">Stop All Lanes</button>
+                <button class="ghost-button" id="runtime-refresh-button">Refresh Readiness</button>
+              </div>
+
+              <div class="runtime-summary-grid">
+                <div>
+                  <span>Ready accounts</span>
+                  <strong id="runtime-ready-count">0</strong>
+                </div>
+                <div>
+                  <span>Boosting lanes</span>
+                  <strong id="runtime-boosting-count">0</strong>
+                </div>
+                <div>
+                  <span>Active slots</span>
+                  <strong id="runtime-active-slot-count">0</strong>
+                </div>
+                <div>
+                  <span>Transport</span>
+                  <strong id="runtime-transport-name">Loading</strong>
+                </div>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-header">
+                <div>
+                  <div class="eyebrow">ACCOUNT LANES</div>
+                  <h3>Per-account runtime readiness</h3>
+                </div>
+                <span class="pill pill--subtle" id="runtime-accounts-pill">0 tracked</span>
+              </div>
+              <p class="card-copy">
+                Each lane reports its saved-session posture, slot counts, and whether it can be started or stopped from the shell right now.
+              </p>
+              <div class="runtime-account-list" id="runtime-account-list"></div>
+            </article>
+
             <article class="card card--log">
               <div class="eyebrow">ACTIVITY CONSOLE</div>
-              <h3>Foundation runtime notes</h3>
-              <pre id="runtime-log">[foundation] runtime contracts created
-[foundation] auth boundary wrapped around SteamCommunityKit
-[next] implement Steam client transport and slot scheduler</pre>
+              <h3>Runtime controller log</h3>
+              <pre id="runtime-log">[foundation] runtime controller initialized
+[next] attach the live Steam client transport</pre>
             </article>
           </section>
 
