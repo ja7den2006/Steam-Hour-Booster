@@ -39,7 +39,7 @@ const fallbackState = {
     recent_events: [
       '[runtime] runtime controller initialized',
       '[runtime] Steam client transport available',
-      '[next] harden reconnect and live slot updates',
+      '[next] runtime telemetry and reconnect hardening active',
     ],
   },
 };
@@ -52,6 +52,7 @@ const shellState = {
   selectedAccountProfileId: null,
   pendingQrLogin: null,
   qrPollTimer: null,
+  runtimePollTimer: null,
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -63,6 +64,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindRuntimeActions();
   await waitForBridge();
   await hydrate();
+  startRuntimePolling();
   window.setTimeout(() => document.body.classList.add('is-ready'), 10);
 });
 
@@ -81,12 +83,7 @@ async function hydrate() {
   shellState.bootstrap = bootstrap || fallbackState;
   shellState.currentPage = shellState.bootstrap.last_page || 'dashboard';
   shellState.maximized = Boolean(shellState.bootstrap.window?.maximized);
-  const profileIds = (shellState.bootstrap.accounts || []).map((account) => account.profile_id);
-  if (!profileIds.length) {
-    shellState.selectedAccountProfileId = null;
-  } else if (!profileIds.includes(shellState.selectedAccountProfileId)) {
-    shellState.selectedAccountProfileId = profileIds[0];
-  }
+  reconcileSelectedProfile();
 
   updateWindowButtons();
   fillOverview();
@@ -97,6 +94,49 @@ async function hydrate() {
   updateTopbarPill();
   selectPage(shellState.currentPage, false);
   selectAuthMode(shellState.authMode);
+}
+
+function reconcileSelectedProfile() {
+  const profileIds = (shellState.bootstrap.accounts || []).map((account) => account.profile_id);
+  if (!profileIds.length) {
+    shellState.selectedAccountProfileId = null;
+  } else if (!profileIds.includes(shellState.selectedAccountProfileId)) {
+    shellState.selectedAccountProfileId = profileIds[0];
+  }
+}
+
+function startRuntimePolling() {
+  stopRuntimePolling();
+  shellState.runtimePollTimer = window.setInterval(async () => {
+    await pollRuntimeState();
+  }, 4000);
+}
+
+function stopRuntimePolling() {
+  if (shellState.runtimePollTimer) {
+    window.clearInterval(shellState.runtimePollTimer);
+    shellState.runtimePollTimer = null;
+  }
+}
+
+async function pollRuntimeState(force = false) {
+  if (document.hidden && !force) {
+    return;
+  }
+
+  const result = await callApi('poll_runtime_state');
+  if (!result?.ok || !result.state) {
+    return;
+  }
+
+  shellState.bootstrap = result.state;
+  reconcileSelectedProfile();
+  fillOverview();
+  fillAccounts();
+  fillRuntime();
+  fillSettings();
+  fillAccountEditor();
+  updateTopbarPill();
 }
 
 function bindNavigation() {
@@ -373,6 +413,7 @@ function fillRuntime() {
   setText('runtime-reconnect-posture', runtime.reconnect_posture);
   setText('runtime-ready-count', String(runtime.counts?.ready_accounts || 0));
   setText('runtime-boosting-count', String(runtime.counts?.boosting_accounts || 0));
+  setText('runtime-paused-count', String(runtime.counts?.paused_accounts || 0));
   setText('runtime-active-slot-count', String(runtime.counts?.active_slots || 0));
   setText('runtime-transport-name', runtime.transport_name || 'Unknown');
   setText('runtime-accounts-pill', `${runtime.counts?.tracked_accounts || 0} tracked`);
@@ -386,7 +427,7 @@ function fillRuntime() {
       : [
           '[runtime] runtime controller initialized',
           '[runtime] Steam client transport available',
-          '[next] harden reconnect and live slot updates',
+          '[next] runtime telemetry and reconnect hardening active',
         ];
     log.textContent = lines.join('\n');
   }
@@ -435,8 +476,20 @@ function fillRuntimeAccounts(statuses) {
           <span>Session</span>
           <strong>${status.session_ready ? 'Ready' : 'Missing'}</strong>
         </div>
+        <div>
+          <span>Auth</span>
+          <strong>${escapeHtml(formatRuntimeAuthSource(status.auth_source))}</strong>
+        </div>
+        <div>
+          <span>Reconnects</span>
+          <strong>${Number(status.reconnect_attempts || 0)}</strong>
+        </div>
       </div>
       <div class="runtime-account__message">${escapeHtml(status.message || 'No runtime message available.')}</div>
+      <div class="runtime-account__details">
+        <div class="runtime-account__detail"><strong>Connected:</strong> ${escapeHtml(formatRuntimeTimestamp(status.connected_at))}</div>
+        ${status.last_error ? `<div class="runtime-account__detail"><strong>Last issue:</strong> ${escapeHtml(status.last_error)}</div>` : ''}
+      </div>
     `;
     list.appendChild(item);
   });
@@ -464,13 +517,24 @@ function updateTopbarPill() {
   if (!pill) {
     return;
   }
-  const boosting = shellState.bootstrap.runtime?.counts?.boosting_accounts || 0;
+  const runtimeCounts = shellState.bootstrap.runtime?.counts || {};
+  const boosting = runtimeCounts.boosting_accounts || 0;
+  const paused = runtimeCounts.paused_accounts || 0;
+  const ready = runtimeCounts.ready_accounts || 0;
   const accounts = shellState.bootstrap.counts.accounts;
   if (boosting > 0) {
     pill.textContent = `${boosting} lane${boosting === 1 ? '' : 's'} active`;
     return;
   }
-  pill.textContent = accounts > 0 ? `${accounts} account${accounts === 1 ? '' : 's'} ready` : 'Onboarding enabled';
+  if (paused > 0) {
+    pill.textContent = `${paused} lane${paused === 1 ? '' : 's'} reconnecting`;
+    return;
+  }
+  if (ready > 0) {
+    pill.textContent = `${ready} account${ready === 1 ? '' : 's'} ready`;
+    return;
+  }
+  pill.textContent = accounts > 0 ? `${accounts} account${accounts === 1 ? '' : 's'} saved` : 'Onboarding enabled';
 }
 
 function selectAuthMode(mode) {
@@ -875,6 +939,30 @@ async function callApi(methodName, ...args) {
   }
 
   return null;
+}
+
+function formatRuntimeAuthSource(source) {
+  if (!source) {
+    return 'Pending';
+  }
+  if (source === 'refresh_token') {
+    return 'Refresh token';
+  }
+  if (source === 'login_key') {
+    return 'Login key';
+  }
+  return source.replace(/_/g, ' ');
+}
+
+function formatRuntimeTimestamp(value) {
+  if (!value) {
+    return 'Not connected yet';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
 }
 
 function escapeHtml(value) {

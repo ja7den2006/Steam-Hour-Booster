@@ -133,7 +133,7 @@ __INLINE_STYLES__
                 <p>The boost engine will sit behind explicit runtime contracts instead of leaking directly into presentation code.</p>
                 <div class="meta-list">
                   <div><span>Current state</span><strong>Controller + live client transport</strong></div>
-                  <div><span>Next focus</span><strong>Reconnect and slot-update hardening</strong></div>
+                  <div><span>Next focus</span><strong>Reconnect and live update telemetry</strong></div>
                   <div><span>Conflict policy</span><strong>Pause first</strong></div>
                   <div><span>Reconnect posture</span><strong>Backoff + resume</strong></div>
                 </div>
@@ -439,6 +439,10 @@ __INLINE_STYLES__
                   <strong id="runtime-boosting-count">0</strong>
                 </div>
                 <div>
+                  <span>Paused lanes</span>
+                  <strong id="runtime-paused-count">0</strong>
+                </div>
+                <div>
                   <span>Active slots</span>
                   <strong id="runtime-active-slot-count">0</strong>
                 </div>
@@ -458,7 +462,7 @@ __INLINE_STYLES__
                 <span class="pill pill--subtle" id="runtime-accounts-pill">0 tracked</span>
               </div>
               <p class="card-copy">
-                Each lane reports its saved-session posture, slot counts, and whether it can be started or stopped from the shell right now.
+                Each lane reports its saved-session posture, active slot set, reconnect status, and whether it can be started or stopped from the shell right now.
               </p>
               <div class="runtime-account-list" id="runtime-account-list"></div>
             </article>
@@ -468,7 +472,7 @@ __INLINE_STYLES__
               <h3>Runtime controller log</h3>
               <pre id="runtime-log">[runtime] runtime controller initialized
 [runtime] Steam client transport available
-[next] harden reconnect and live slot updates</pre>
+[next] runtime telemetry and reconnect hardening active</pre>
             </article>
           </section>
 

@@ -44,19 +44,19 @@ This prevents the rest of the application from directly depending on `SteamCommu
 
 ### Runtime boundary
 
-The boost runtime now sits behind internal contracts so the desktop shell stays independent from the protocol implementation. The first live engine uses `ValvePython/steam` with refresh-token client logon sourced from the saved `SteamCommunityKit` bundle for:
+The boost runtime now sits behind internal contracts so the desktop shell stays independent from the protocol implementation. The current live engine uses `ValvePython/steam` with refresh-token client logon sourced from the saved `SteamCommunityKit` bundle, plus cached login-key reuse for reconnects, for:
 
 - account session startup
 - concurrent game-slot play state
 - pause/resume behavior
-- reconnect and retry logic
+- reconnect, retry, and live lane reconfiguration logic
 
 ## Local State
 
 App state is stored under `%LOCALAPPDATA%\\SteamHourBooster`:
 
 - `config.json` for safe non-secret UI/config state
-- `sessions/` for exported community bundles or later runtime caches
+- `sessions/` for exported community bundles and runtime cache data
 - `logs/` for operational logs
 
 Secrets should not be written into the main config payload.
@@ -72,4 +72,6 @@ Secrets should not be written into the main config payload.
 - runtime-facing account profile editing and slot-list validation
 - startup runtime readiness classification and per-account lane state
 - desktop runtime controls backed by a live Steam client transport
+- reconnect-aware lane telemetry surfaced back into the desktop shell
+- cached login-key reuse and live slot/persona updates for active lanes
 - tests for config, auth mapping, session storage, and desktop bridge workflows

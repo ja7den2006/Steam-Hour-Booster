@@ -731,7 +731,7 @@ textarea {
 
 .runtime-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 12px;
 }
 
@@ -804,7 +804,7 @@ textarea {
 .runtime-account__meta {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 12px;
 }
 
@@ -812,6 +812,27 @@ textarea {
   margin-top: 14px;
   color: var(--text-soft);
   line-height: 1.6;
+}
+
+.runtime-account__details {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.runtime-account__detail {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(9, 13, 18, 0.72);
+  border: 1px solid rgba(35, 43, 53, 0.92);
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.runtime-account__detail strong {
+  color: var(--text);
 }
 
 .runtime-state {

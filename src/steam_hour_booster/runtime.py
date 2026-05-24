@@ -34,6 +34,10 @@ except ImportError:
     ip4_to_int = None
 
 
+def _iso_timestamp() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
 class RuntimeState(str, Enum):
     IDLE = "idle"
     READY = "ready"
@@ -55,11 +59,19 @@ class AccountRuntimeStatus:
     configured_app_ids: List[int] = field(default_factory=list)
     active_app_ids: List[int] = field(default_factory=list)
     custom_status: str = ""
+    auth_source: str = ""
+    reconnect_attempts: int = 0
+    connected_at: str = ""
+    last_error: str = ""
     message: str = ""
     updated_at: str = ""
 
     def to_dict(self) -> Dict[str, object]:
-        can_start = self.session_ready and bool(self.configured_app_ids) and self.state != RuntimeState.BOOSTING
+        can_start = (
+            self.session_ready
+            and bool(self.configured_app_ids)
+            and self.state not in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED)
+        )
         can_stop = self.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED)
         return {
             "profile_id": self.profile_id,
@@ -75,6 +87,10 @@ class AccountRuntimeStatus:
             "active_app_ids": list(self.active_app_ids),
             "active_slot_count": len(self.active_app_ids),
             "custom_status": self.custom_status,
+            "auth_source": self.auth_source,
+            "reconnect_attempts": self.reconnect_attempts,
+            "connected_at": self.connected_at,
+            "last_error": self.last_error,
             "message": self.message,
             "updated_at": self.updated_at,
             "can_start": can_start,
@@ -100,6 +116,7 @@ class RuntimeSnapshot:
         ]
         ready_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.READY)
         boosting_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.BOOSTING)
+        paused_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.PAUSED)
         error_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.ERROR)
         active_slot_count = sum(len(status.active_app_ids) for status in self.accounts.values())
         return {
@@ -110,6 +127,7 @@ class RuntimeSnapshot:
                 "tracked_accounts": len(statuses),
                 "ready_accounts": ready_count,
                 "boosting_accounts": boosting_count,
+                "paused_accounts": paused_count,
                 "error_accounts": error_count,
                 "active_slots": active_slot_count,
             },
@@ -124,6 +142,18 @@ class RuntimeStartResult:
     message: str
 
 
+@dataclass
+class RuntimeLaneTelemetry:
+    state: RuntimeState
+    active_app_ids: List[int] = field(default_factory=list)
+    auth_source: str = ""
+    reconnect_attempts: int = 0
+    connected_at: str = ""
+    last_error: str = ""
+    message: str = ""
+    updated_at: str = ""
+
+
 class BoosterRuntime(Protocol):
     name: str
     preview_mode: bool
@@ -132,6 +162,12 @@ class BoosterRuntime(Protocol):
         ...
 
     def stop(self, profile_id: str) -> str:
+        ...
+
+    def reconfigure(self, account: AccountProfile, session_bundle: Dict[str, object]) -> RuntimeStartResult:
+        ...
+
+    def inspect(self) -> Dict[str, RuntimeLaneTelemetry]:
         ...
 
     def shutdown(self) -> None:
@@ -152,16 +188,34 @@ class PreviewBoosterRuntime:
         slot_count = len(active_app_ids)
         return RuntimeStartResult(
             active_app_ids=active_app_ids,
-            message=(
-                "Preview runtime armed with %s slot%s. "
-                "Live Steam client transport is not attached yet."
-            )
-            % (slot_count, "" if slot_count == 1 else "s"),
+            message="Preview runtime armed with %s slot%s." % (slot_count, "" if slot_count == 1 else "s"),
         )
 
     def stop(self, profile_id: str) -> str:
         self._active_profiles.pop(profile_id, None)
         return "Boost lane stopped."
+
+    def reconfigure(self, account: AccountProfile, session_bundle: Dict[str, object]) -> RuntimeStartResult:
+        del session_bundle
+        active_app_ids = [int(game.app_id) for game in account.games if game.enabled]
+        self._active_profiles[account.profile_id] = list(active_app_ids)
+        return RuntimeStartResult(
+            active_app_ids=active_app_ids,
+            message="Preview lane updated to %s slot%s." % (len(active_app_ids), "" if len(active_app_ids) == 1 else "s"),
+        )
+
+    def inspect(self) -> Dict[str, RuntimeLaneTelemetry]:
+        now = _iso_timestamp()
+        return {
+            profile_id: RuntimeLaneTelemetry(
+                state=RuntimeState.BOOSTING,
+                active_app_ids=list(app_ids),
+                auth_source="preview",
+                message="Preview runtime lane active with %s slot%s." % (len(app_ids), "" if len(app_ids) == 1 else "s"),
+                updated_at=now,
+            )
+            for profile_id, app_ids in self._active_profiles.items()
+        }
 
     def shutdown(self) -> None:
         self._active_profiles.clear()
@@ -222,9 +276,7 @@ if ValvePythonSteamClient is not None:
             message.body.chat_mode = self.chat_mode
 
             if login_id is None:
-                message.body.obfuscated_private_ip.v4 = (
-                    ip4_to_int(self.connection.local_address) ^ 0xF00DBAAD
-                )
+                message.body.obfuscated_private_ip.v4 = ip4_to_int(self.connection.local_address) ^ 0xF00DBAAD
             else:
                 message.body.obfuscated_private_ip.v4 = int(login_id)
 
@@ -261,6 +313,13 @@ class _LiveWorkerConfig:
     app_ids: List[int]
 
 
+@dataclass
+class _LoginAttemptResult:
+    client: Optional[RefreshTokenSteamClient]
+    auth_source: str = ""
+    error_message: str = ""
+
+
 class _LiveBoostWorker:
     def __init__(
         self,
@@ -269,23 +328,36 @@ class _LiveBoostWorker:
         client_factory: Callable[[], RefreshTokenSteamClient],
         credential_dir: Path,
         sleep_interval: float = 1.0,
+        reconnect_max_delay: float = 30.0,
     ) -> None:
-        self._config = config
         self._client_factory = client_factory
         self._credential_dir = credential_dir
-        self._sleep_interval = max(0.2, float(sleep_interval))
+        self._sleep_interval = max(0.05, float(sleep_interval))
+        self._reconnect_max_delay = max(0.1, float(reconnect_max_delay))
         self._client = None
         self._thread = None
         self._stop_event = threading.Event()
         self._started_event = threading.Event()
         self._stopped_event = threading.Event()
+        self._condition = threading.Condition()
+        self._desired_config = config
+        self._desired_revision = 0
+        self._applied_revision = -1
         self._active_app_ids: List[int] = []
+        self._state = RuntimeState.STARTING
         self._message = "Boost lane not started."
+        self._auth_source = ""
+        self._reconnect_attempts = 0
+        self._connected_at = ""
+        self._last_error = ""
+        self._updated_at = _iso_timestamp()
         self._error_message = ""
+        self._cached_login_key = self._load_cached_login_key()
 
     @property
     def active_app_ids(self) -> List[int]:
-        return list(self._active_app_ids)
+        with self._condition:
+            return list(self._active_app_ids)
 
     def start_and_wait(self, timeout: float) -> RuntimeStartResult:
         if self._thread is not None:
@@ -293,7 +365,7 @@ class _LiveBoostWorker:
 
         self._thread = threading.Thread(
             target=self._run,
-            name="steam-hour-booster-%s" % self._config.profile_id,
+            name="steam-hour-booster-%s" % self._desired_config.profile_id,
             daemon=True,
         )
         self._thread.start()
@@ -302,70 +374,346 @@ class _LiveBoostWorker:
             self.stop_and_wait(timeout=5.0)
             raise RuntimeError("Timed out waiting for the Steam client session to start.")
 
-        if self._error_message:
-            raise RuntimeError(self._error_message)
-
-        return RuntimeStartResult(
-            active_app_ids=self.active_app_ids,
-            message=self._message,
-        )
+        with self._condition:
+            if self._error_message:
+                raise RuntimeError(self._error_message)
+            return RuntimeStartResult(
+                active_app_ids=list(self._active_app_ids),
+                message=self._message,
+            )
 
     def stop_and_wait(self, timeout: float = 10.0) -> str:
         self._stop_event.set()
+        with self._condition:
+            self._condition.notify_all()
         if self._thread is not None:
             self._thread.join(max(timeout, 0.5))
-        return self._message or "Boost lane stopped."
+        with self._condition:
+            return self._message or "Boost lane stopped."
+
+    def reconfigure_and_wait(self, config: _LiveWorkerConfig, timeout: float = 6.0) -> RuntimeStartResult:
+        if self._thread is None or not self._thread.is_alive():
+            raise RuntimeError("Boost lane is not running.")
+
+        with self._condition:
+            self._desired_config = config
+            self._desired_revision += 1
+            requested_revision = self._desired_revision
+            self._message = "Applying live lane update."
+            self._updated_at = _iso_timestamp()
+            self._condition.notify_all()
+
+        deadline = time.time() + max(0.5, float(timeout))
+        while time.time() < deadline:
+            with self._condition:
+                if self._error_message:
+                    raise RuntimeError(self._error_message)
+                if self._applied_revision >= requested_revision:
+                    return RuntimeStartResult(
+                        active_app_ids=list(self._active_app_ids),
+                        message=self._message,
+                    )
+                remaining = deadline - time.time()
+                self._condition.wait(timeout=min(0.15, max(remaining, 0.01)))
+
+        with self._condition:
+            queued_message = self._message
+            if self._state == RuntimeState.PAUSED:
+                queued_message = "Live lane update queued while the Steam client reconnects."
+            elif not queued_message or queued_message == "Applying live lane update.":
+                queued_message = "Live lane update queued."
+            return RuntimeStartResult(
+                active_app_ids=list(self._active_app_ids),
+                message=queued_message,
+            )
+
+    def snapshot(self) -> RuntimeLaneTelemetry:
+        with self._condition:
+            return RuntimeLaneTelemetry(
+                state=self._state,
+                active_app_ids=list(self._active_app_ids),
+                auth_source=self._auth_source,
+                reconnect_attempts=self._reconnect_attempts,
+                connected_at=self._connected_at,
+                last_error=self._last_error,
+                message=self._message,
+                updated_at=self._updated_at,
+            )
 
     def _run(self) -> None:
         try:
-            self._credential_dir.mkdir(parents=True, exist_ok=True)
-            client = self._client_factory()
-            self._client = client
-            client.set_credential_location(str(self._credential_dir))
-
-            result = client.login_with_refresh_token(
-                self._config.refresh_token,
-                self._config.steam_id,
-                account_name=self._config.account_name,
-            )
-            if result != EResult.OK:
-                self._error_message = "Steam client logon failed: %s." % getattr(result, "name", result)
-                self._message = self._error_message
+            initial = self._attempt_login(allow_login_key=True)
+            if initial.client is None:
+                failure = initial.error_message or "Steam client logon failed."
+                with self._condition:
+                    self._error_message = failure
+                self._set_status(RuntimeState.ERROR, failure, last_error=failure)
                 return
 
-            persona_state = getattr(EPersonaState, self._config.persona_state, None)
-            if persona_state is not None:
-                client.change_status(persona_state=persona_state)
-            client.games_played(list(self._config.app_ids))
-            self._active_app_ids = list(self._config.app_ids)
-            self._message = (
-                "Steam client lane active with %s slot%s."
-                % (len(self._active_app_ids), "" if len(self._active_app_ids) == 1 else "s")
-            )
+            self._client = initial.client
+            self._apply_desired_config(initial.auth_source, mode="started")
             self._started_event.set()
 
             while not self._stop_event.is_set():
+                client = self._client
+                if client is None:
+                    client = self._recover_from_disconnect()
+                    if client is None:
+                        return
+
                 if not client.connected or not client.logged_on:
-                    self._error_message = "Steam client session disconnected."
-                    self._message = self._error_message
-                    return
+                    disconnect_error = "Steam client session disconnected."
+                    self._set_status(
+                        RuntimeState.PAUSED,
+                        "Steam client session lost. Reconnecting with backoff.",
+                        active_app_ids=self.active_app_ids,
+                        last_error=disconnect_error,
+                    )
+                    self._safe_disconnect_client(client)
+                    self._client = None
+                    continue
+
+                self._maybe_persist_login_key(client)
+
+                with self._condition:
+                    needs_apply = self._applied_revision < self._desired_revision
+
+                if needs_apply:
+                    self._apply_desired_config(self._auth_source or "refresh_token", mode="updated")
+
+                if self._stop_event.is_set():
+                    break
                 client.sleep(self._sleep_interval)
         except Exception as exc:
-            self._error_message = str(exc).strip() or "Unexpected Steam client runtime failure."
-            self._message = self._error_message
+            failure = str(exc).strip() or "Unexpected Steam client runtime failure."
+            with self._condition:
+                self._error_message = failure
+            self._set_status(RuntimeState.ERROR, failure, last_error=failure)
         finally:
             if not self._started_event.is_set():
                 self._started_event.set()
+            self._safe_disconnect_client(self._client)
+            self._client = None
+            with self._condition:
+                self._active_app_ids = []
+                self._condition.notify_all()
+            self._stopped_event.set()
+
+    def _recover_from_disconnect(self) -> Optional[RefreshTokenSteamClient]:
+        while not self._stop_event.is_set():
+            self._reconnect_attempts += 1
+            attempt_number = self._reconnect_attempts
+            delay_seconds = self._reconnect_delay_for_attempt(attempt_number)
+            self._set_status(
+                RuntimeState.PAUSED,
+                "Reconnect attempt %s in %.1fs." % (attempt_number, delay_seconds),
+                active_app_ids=self.active_app_ids,
+                reconnect_attempts=attempt_number,
+            )
+            if self._stop_event.wait(delay_seconds):
+                return None
+
+            attempt = self._attempt_login(allow_login_key=True)
+            if attempt.client is not None:
+                self._client = attempt.client
+                self._apply_desired_config(attempt.auth_source, mode="resumed")
+                return attempt.client
+
+            failure = attempt.error_message or "Reconnect attempt failed."
+            self._set_status(
+                RuntimeState.PAUSED,
+                "Reconnect attempt %s failed: %s" % (attempt_number, failure),
+                active_app_ids=self.active_app_ids,
+                reconnect_attempts=attempt_number,
+                last_error=failure,
+            )
+        return None
+
+    def _attempt_login(self, *, allow_login_key: bool) -> _LoginAttemptResult:
+        self._credential_dir.mkdir(parents=True, exist_ok=True)
+        errors: List[str] = []
+        config = self._clone_config()
+
+        if allow_login_key and self._cached_login_key and config.account_name:
+            login_key_client = self._client_factory()
+            login_key_client.set_credential_location(str(self._credential_dir))
+            result = login_key_client.login(config.account_name, login_key=self._cached_login_key)
+            if result == EResult.OK:
+                return _LoginAttemptResult(login_key_client, auth_source="login_key")
+            errors.append("login-key logon failed: %s." % getattr(result, "name", result))
+            self._clear_cached_login_key()
+            self._safe_disconnect_client(login_key_client)
+
+        refresh_client = self._client_factory()
+        refresh_client.set_credential_location(str(self._credential_dir))
+        result = refresh_client.login_with_refresh_token(
+            config.refresh_token,
+            config.steam_id,
+            account_name=config.account_name,
+        )
+        if result == EResult.OK:
+            return _LoginAttemptResult(refresh_client, auth_source="refresh_token")
+
+        errors.append("refresh-token logon failed: %s." % getattr(result, "name", result))
+        self._safe_disconnect_client(refresh_client)
+        return _LoginAttemptResult(None, error_message=" ".join(errors).strip())
+
+    def _apply_desired_config(self, auth_source: str, *, mode: str) -> RuntimeStartResult:
+        client = self._client
+        if client is None:
+            raise RuntimeError("Steam client session is not attached.")
+
+        config, revision = self._clone_config(with_revision=True)
+        persona_state = getattr(EPersonaState, config.persona_state, None)
+        if persona_state is not None:
+            client.change_status(persona_state=persona_state)
+        client.games_played(list(config.app_ids))
+        self._maybe_persist_login_key(client)
+        connected_at = _iso_timestamp() if mode in ("started", "resumed") or not self._connected_at else self._connected_at
+
+        message = self._build_active_message(config, auth_source=auth_source, mode=mode)
+        if config.custom_status:
+            message = "%s Custom status stays stored locally for now." % message
+
+        self._set_status(
+            RuntimeState.BOOSTING,
+            message,
+            active_app_ids=list(config.app_ids),
+            auth_source=auth_source,
+            reconnect_attempts=self._reconnect_attempts,
+            connected_at=connected_at,
+            last_error="",
+        )
+        with self._condition:
+            self._applied_revision = revision
+            self._condition.notify_all()
+            return RuntimeStartResult(
+                active_app_ids=list(self._active_app_ids),
+                message=self._message,
+            )
+
+    def _build_active_message(self, config: _LiveWorkerConfig, *, auth_source: str, mode: str) -> str:
+        slot_count = len(config.app_ids)
+        auth_label = {
+            "refresh_token": "refresh token",
+            "login_key": "login key",
+            "preview": "preview state",
+        }.get(auth_source, auth_source.replace("_", " ") or "session")
+
+        if mode == "updated":
+            prefix = "Live lane updated"
+        elif mode == "resumed":
+            prefix = "Steam client lane resumed after reconnect"
+        else:
+            prefix = "Steam client lane active"
+
+        return "%s with %s slot%s via %s." % (
+            prefix,
+            slot_count,
+            "" if slot_count == 1 else "s",
+            auth_label,
+        )
+
+    def _set_status(
+        self,
+        state: RuntimeState,
+        message: str,
+        *,
+        active_app_ids: Optional[List[int]] = None,
+        auth_source: Optional[str] = None,
+        reconnect_attempts: Optional[int] = None,
+        connected_at: Optional[str] = None,
+        last_error: Optional[str] = None,
+    ) -> None:
+        with self._condition:
+            self._state = state
+            self._message = message
+            if active_app_ids is not None:
+                self._active_app_ids = list(active_app_ids)
+            if auth_source is not None:
+                self._auth_source = auth_source
+            if reconnect_attempts is not None:
+                self._reconnect_attempts = reconnect_attempts
+            if connected_at is not None:
+                self._connected_at = connected_at
+            if last_error is not None:
+                self._last_error = last_error
+            self._updated_at = _iso_timestamp()
+            self._condition.notify_all()
+
+    def _maybe_persist_login_key(self, client: RefreshTokenSteamClient) -> None:
+        login_key = str(getattr(client, "login_key", "") or "").strip()
+        if not login_key or login_key == self._cached_login_key:
+            return
+        self._cached_login_key = login_key
+        payload = {
+            "account_name": self._desired_config.account_name,
+            "steam_id": self._desired_config.steam_id,
+            "login_key": login_key,
+            "updated_at": _iso_timestamp(),
+        }
+        self._credential_dir.mkdir(parents=True, exist_ok=True)
+        self._cache_path().write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def _clear_cached_login_key(self) -> None:
+        self._cached_login_key = ""
+        path = self._cache_path()
+        if path.exists():
             try:
-                if self._client is not None:
-                    if self._client.logged_on:
-                        self._client.logout()
-                    elif self._client.connected:
-                        self._client.disconnect()
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            data["login_key"] = ""
+            data["updated_at"] = _iso_timestamp()
+            try:
+                path.write_text(json.dumps(data, indent=2), encoding="utf-8")
             except Exception:
                 pass
-            self._active_app_ids = []
-            self._stopped_event.set()
+
+    def _load_cached_login_key(self) -> str:
+        path = self._cache_path()
+        if not path.exists():
+            return ""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+        return str(data.get("login_key", "") or "").strip()
+
+    def _cache_path(self) -> Path:
+        return self._credential_dir / "client_auth.json"
+
+    def _clone_config(self, *, with_revision: bool = False):
+        with self._condition:
+            config = _LiveWorkerConfig(
+                profile_id=self._desired_config.profile_id,
+                display_name=self._desired_config.display_name,
+                account_name=self._desired_config.account_name,
+                steam_id=self._desired_config.steam_id,
+                refresh_token=self._desired_config.refresh_token,
+                persona_state=self._desired_config.persona_state,
+                custom_status=self._desired_config.custom_status,
+                app_ids=list(self._desired_config.app_ids),
+            )
+            if with_revision:
+                return config, self._desired_revision
+            return config
+
+    def _reconnect_delay_for_attempt(self, attempt_number: int) -> float:
+        attempt = max(1, int(attempt_number))
+        return min(self._reconnect_max_delay, float((2 ** min(attempt, 5)) - 1))
+
+    @staticmethod
+    def _safe_disconnect_client(client: Optional[RefreshTokenSteamClient]) -> None:
+        if client is None:
+            return
+        try:
+            if getattr(client, "logged_on", False):
+                client.logout()
+            elif getattr(client, "connected", False):
+                client.disconnect()
+        except Exception:
+            pass
 
 
 class SteamNetworkBoosterRuntime:
@@ -379,43 +727,31 @@ class SteamNetworkBoosterRuntime:
         client_factory: Optional[Callable[[], RefreshTokenSteamClient]] = None,
         start_timeout: float = 20.0,
         sleep_interval: float = 1.0,
+        reconnect_max_delay: float = 30.0,
+        reconfigure_timeout: float = 6.0,
     ) -> None:
         if RefreshTokenSteamClient is None:
             raise RuntimeError("The steam client protocol package is not installed.")
         self._session_store = session_store
         self._client_factory = client_factory or RefreshTokenSteamClient
         self._start_timeout = max(5.0, float(start_timeout))
-        self._sleep_interval = max(0.2, float(sleep_interval))
+        self._sleep_interval = max(0.05, float(sleep_interval))
+        self._reconnect_max_delay = max(0.1, float(reconnect_max_delay))
+        self._reconfigure_timeout = max(1.0, float(reconfigure_timeout))
         self._workers: Dict[str, _LiveBoostWorker] = {}
         self._credential_root = Path(self._session_store.base_dir) / "cm_credentials"
 
     def start(self, account: AccountProfile, session_bundle: Dict[str, object]) -> RuntimeStartResult:
-        refresh_token = str(session_bundle.get("refresh_token", "") or "").strip()
-        steam_id = str(session_bundle.get("steam_id", "") or account.steam_id or "").strip()
-        if not refresh_token:
-            raise RuntimeError("Saved session bundle does not contain a Steam refresh token.")
-        if not steam_id:
-            raise RuntimeError("Saved session bundle does not include a SteamID.")
-        if not _refresh_token_is_client_usable(refresh_token):
-            raise RuntimeError("The saved refresh token is not valid for Steam client logon.")
-
+        config = self._build_worker_config(account, session_bundle)
         if account.profile_id in self._workers:
             self.stop(account.profile_id)
 
         worker = _LiveBoostWorker(
-            config=_LiveWorkerConfig(
-                profile_id=account.profile_id,
-                display_name=account.display_name,
-                account_name=account.account_name,
-                steam_id=steam_id,
-                refresh_token=refresh_token,
-                persona_state=account.persona_state,
-                custom_status=account.custom_status,
-                app_ids=[int(game.app_id) for game in account.games if game.enabled],
-            ),
+            config=config,
             client_factory=self._client_factory,
             credential_dir=self._credential_root / account.profile_id,
             sleep_interval=self._sleep_interval,
+            reconnect_max_delay=self._reconnect_max_delay,
         )
         self._workers[account.profile_id] = worker
         try:
@@ -431,9 +767,44 @@ class SteamNetworkBoosterRuntime:
         message = worker.stop_and_wait(timeout=8.0)
         return message if message else "Boost lane stopped."
 
+    def reconfigure(self, account: AccountProfile, session_bundle: Dict[str, object]) -> RuntimeStartResult:
+        worker = self._workers.get(account.profile_id)
+        if worker is None:
+            raise RuntimeError("Boost lane is not running.")
+        config = self._build_worker_config(account, session_bundle)
+        return worker.reconfigure_and_wait(config, timeout=self._reconfigure_timeout)
+
+    def inspect(self) -> Dict[str, RuntimeLaneTelemetry]:
+        return {
+            profile_id: worker.snapshot()
+            for profile_id, worker in self._workers.items()
+        }
+
     def shutdown(self) -> None:
         for profile_id in list(self._workers.keys()):
             self.stop(profile_id)
+
+    @staticmethod
+    def _build_worker_config(account: AccountProfile, session_bundle: Dict[str, object]) -> _LiveWorkerConfig:
+        refresh_token = str(session_bundle.get("refresh_token", "") or "").strip()
+        steam_id = str(session_bundle.get("steam_id", "") or account.steam_id or "").strip()
+        if not refresh_token:
+            raise RuntimeError("Saved session bundle does not contain a Steam refresh token.")
+        if not steam_id:
+            raise RuntimeError("Saved session bundle does not include a SteamID.")
+        if not _refresh_token_is_client_usable(refresh_token):
+            raise RuntimeError("The saved refresh token is not valid for Steam client logon.")
+
+        return _LiveWorkerConfig(
+            profile_id=account.profile_id,
+            display_name=account.display_name,
+            account_name=account.account_name,
+            steam_id=steam_id,
+            refresh_token=refresh_token,
+            persona_state=account.persona_state,
+            custom_status=account.custom_status,
+            app_ids=[int(game.app_id) for game in account.games if game.enabled],
+        )
 
 
 def build_default_transport(session_store: SessionStore) -> BoosterRuntime:
@@ -456,13 +827,12 @@ class RuntimeController:
         self._snapshot = RuntimeSnapshot(
             transport_name=self._transport.name,
             preview_mode=bool(self._transport.preview_mode),
-            updated_at=self._iso_timestamp(),
+            updated_at=_iso_timestamp(),
         )
-        self._log_event(
-            "Runtime controller initialized with %s transport." % self._transport.name
-        )
+        self._log_event("Runtime controller initialized with %s transport." % self._transport.name)
 
     def snapshot(self) -> RuntimeSnapshot:
+        self._sync_transport_status()
         return self._snapshot
 
     def refresh_accounts(self, accounts: List[AccountProfile], *, reason: str = "") -> RuntimeSnapshot:
@@ -474,17 +844,21 @@ class RuntimeController:
         stale_ids = [profile_id for profile_id in self._snapshot.accounts if profile_id not in known_ids]
         for profile_id in stale_ids:
             stale_status = self._snapshot.accounts.pop(profile_id, None)
-            if stale_status and stale_status.state == RuntimeState.BOOSTING:
+            if stale_status and stale_status.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
                 try:
                     self._transport.stop(profile_id)
                 except Exception:
                     pass
             self._log_event("Removed runtime lane for %s." % profile_id)
 
+        self._sync_transport_status()
         self._touch_snapshot()
         if reason:
             tracked_count = len(self._snapshot.accounts)
-            self._log_event("Runtime readiness refreshed for %s account%s." % (tracked_count, "" if tracked_count == 1 else "s"))
+            self._log_event(
+                "Runtime readiness refreshed for %s account%s."
+                % (tracked_count, "" if tracked_count == 1 else "s")
+            )
         return self._snapshot
 
     def start_profile(self, profile_id: str, accounts: List[AccountProfile]) -> AccountRuntimeStatus:
@@ -494,10 +868,13 @@ class RuntimeController:
             raise KeyError("That account profile was not found.")
 
         status = self._snapshot.accounts[profile_id]
+        if status.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
+            return status
+
         if not status.session_ready:
             status.state = RuntimeState.ERROR
             status.message = "Saved session bundle missing or incomplete."
-            status.updated_at = self._iso_timestamp()
+            status.updated_at = _iso_timestamp()
             self._touch_snapshot()
             self._log_event("Unable to start %s because the saved session bundle is unavailable." % account.display_name)
             return status
@@ -505,7 +882,7 @@ class RuntimeController:
         if not status.configured_app_ids:
             status.state = RuntimeState.IDLE
             status.message = "No game slots configured."
-            status.updated_at = self._iso_timestamp()
+            status.updated_at = _iso_timestamp()
             self._touch_snapshot()
             self._log_event("Unable to start %s because no game slots are configured." % account.display_name)
             return status
@@ -513,15 +890,17 @@ class RuntimeController:
         session_bundle = self._load_session_bundle(account)
         status.state = RuntimeState.STARTING
         status.message = "Preparing boost lane."
-        status.updated_at = self._iso_timestamp()
+        status.updated_at = _iso_timestamp()
         self._touch_snapshot()
 
         try:
             result = self._transport.start(account, session_bundle or {})
+            self._sync_transport_status()
+            status = self._snapshot.accounts[profile_id]
             status.state = RuntimeState.BOOSTING
             status.active_app_ids = list(result.active_app_ids)
             status.message = result.message
-            status.updated_at = self._iso_timestamp()
+            status.updated_at = _iso_timestamp()
             self._touch_snapshot()
             self._log_event(
                 "Started %s with %s slot%s."
@@ -536,7 +915,7 @@ class RuntimeController:
             status.state = RuntimeState.ERROR
             status.active_app_ids = []
             status.message = "Runtime start failed: %s" % (str(exc).strip() or "Unknown error.")
-            status.updated_at = self._iso_timestamp()
+            status.updated_at = _iso_timestamp()
             self._touch_snapshot()
             self._log_event("Runtime start failed for %s." % account.display_name)
             return status
@@ -557,19 +936,60 @@ class RuntimeController:
             status.state = RuntimeState.ERROR
             status.active_app_ids = []
             status.message = "Runtime stop failed: %s" % (str(exc).strip() or "Unknown error.")
-            status.updated_at = self._iso_timestamp()
+            status.updated_at = _iso_timestamp()
             self._touch_snapshot()
             self._log_event("Runtime stop failed for %s." % account.display_name)
             return status
 
         status.active_app_ids = []
+        status.auth_source = ""
+        status.reconnect_attempts = 0
+        status.connected_at = ""
+        status.last_error = ""
         self._apply_ready_state(status)
         if stop_message:
             status.message = "%s %s" % (stop_message, self._ready_message_for(status))
-        status.updated_at = self._iso_timestamp()
+        status.updated_at = _iso_timestamp()
         self._touch_snapshot()
         self._log_event("Stopped %s." % account.display_name)
         return status
+
+    def reconfigure_profile(self, profile_id: str, accounts: List[AccountProfile]) -> AccountRuntimeStatus:
+        self.refresh_accounts(accounts)
+        account = self._find_account(profile_id, accounts)
+        if account is None:
+            raise KeyError("That account profile was not found.")
+
+        status = self._snapshot.accounts[profile_id]
+        if status.state not in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
+            return status
+
+        if not status.session_ready:
+            status.state = RuntimeState.ERROR
+            status.message = "Saved session bundle missing or incomplete."
+            status.updated_at = _iso_timestamp()
+            self._touch_snapshot()
+            return status
+
+        session_bundle = self._load_session_bundle(account)
+        try:
+            result = self._transport.reconfigure(account, session_bundle or {})
+            self._sync_transport_status()
+            status = self._snapshot.accounts[profile_id]
+            if result.active_app_ids:
+                status.active_app_ids = list(result.active_app_ids)
+            status.message = result.message
+            status.updated_at = _iso_timestamp()
+            self._touch_snapshot()
+            self._log_event("Updated live lane for %s." % account.display_name)
+            return status
+        except Exception as exc:
+            status.state = RuntimeState.ERROR
+            status.message = "Runtime update failed: %s" % (str(exc).strip() or "Unknown error.")
+            status.updated_at = _iso_timestamp()
+            self._touch_snapshot()
+            self._log_event("Runtime update failed for %s." % account.display_name)
+            return status
 
     def start_all(self, accounts: List[AccountProfile]) -> Dict[str, int]:
         self.refresh_accounts(accounts)
@@ -578,7 +998,13 @@ class RuntimeController:
         failed = 0
         for account in accounts:
             status = self._snapshot.accounts.get(account.profile_id)
-            if status is None or not status.session_ready or not status.configured_app_ids:
+            if status is None:
+                skipped += 1
+                continue
+            if status.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
+                skipped += 1
+                continue
+            if not status.session_ready or not status.configured_app_ids:
                 skipped += 1
                 continue
             result = self.start_profile(account.profile_id, accounts)
@@ -627,22 +1053,24 @@ class RuntimeController:
         status.configured_app_ids = [int(game.app_id) for game in account.games if game.enabled]
         status.session_ready = self._has_valid_session_bundle(account)
 
-        if status.state == RuntimeState.BOOSTING:
+        if status.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
             if not status.session_ready:
                 status.state = RuntimeState.ERROR
                 status.active_app_ids = []
                 status.message = "Saved session bundle disappeared while the boost lane was active."
-            elif status.configured_app_ids and status.active_app_ids == status.configured_app_ids:
-                status.message = "Boost lane active."
-            elif status.configured_app_ids:
-                status.message = "Boost lane active. Restart this lane to apply the updated slot set."
-            else:
-                status.message = "Boost lane active with a previous slot set. Add slots or stop the lane."
+            elif not status.configured_app_ids:
+                status.state = RuntimeState.PAUSED
+                status.active_app_ids = []
+                status.message = "No configured slots remain for this active lane."
         else:
             status.active_app_ids = []
+            status.auth_source = ""
+            status.reconnect_attempts = 0
+            status.connected_at = ""
+            status.last_error = ""
             self._apply_ready_state(status)
 
-        status.updated_at = self._iso_timestamp()
+        status.updated_at = _iso_timestamp()
         self._snapshot.accounts[account.profile_id] = status
 
     def _apply_ready_state(self, status: AccountRuntimeStatus) -> None:
@@ -678,17 +1106,29 @@ class RuntimeController:
                 return account
         return None
 
+    def _sync_transport_status(self) -> None:
+        live_statuses = self._transport.inspect()
+        for profile_id, telemetry in live_statuses.items():
+            status = self._snapshot.accounts.get(profile_id)
+            if status is None:
+                continue
+            status.state = telemetry.state
+            status.active_app_ids = list(telemetry.active_app_ids)
+            status.auth_source = telemetry.auth_source
+            status.reconnect_attempts = telemetry.reconnect_attempts
+            status.connected_at = telemetry.connected_at
+            status.last_error = telemetry.last_error
+            status.message = telemetry.message or status.message
+            status.updated_at = telemetry.updated_at or _iso_timestamp()
+        self._touch_snapshot()
+
     def _touch_snapshot(self) -> None:
         self._snapshot.transport_name = self._transport.name
         self._snapshot.preview_mode = bool(self._transport.preview_mode)
-        self._snapshot.updated_at = self._iso_timestamp()
+        self._snapshot.updated_at = _iso_timestamp()
 
     def _log_event(self, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
         self._snapshot.recent_events.append("[%s] %s" % (timestamp, message))
         self._snapshot.recent_events = self._snapshot.recent_events[-self._event_limit :]
         self._touch_snapshot()
-
-    @staticmethod
-    def _iso_timestamp() -> str:
-        return datetime.now().isoformat(timespec="seconds")

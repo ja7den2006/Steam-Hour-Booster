@@ -16,7 +16,7 @@ This repository starts with the production foundation:
 
 ## Current Scope
 
-The current repository state now covers the shell, auth boundary, and the first live Steam client runtime slice:
+The current repository state now covers the shell, auth boundary, and a live Steam client runtime with the first hardening pass:
 
 - branded desktop shell and page structure
 - durable config and session storage
@@ -42,9 +42,13 @@ The current repository state now covers the shell, auth boundary, and the first 
   - start or stop all lanes
 - a runtime controller with activity logging, ready/boosting/error counts, and per-account lane status cards
 - a live Steam CM transport using `ValvePython/steam` and refresh-token client logon
+- cached login-key reuse after a successful client session
+- reconnect/backoff handling for dropped live lanes
+- live lane reconfiguration for slot and persona changes without forcing a full stop/start cycle
+- operator-facing runtime telemetry for auth source, reconnect count, and last runtime issue
 - test coverage for config, auth mapping, session storage, and desktop bridge behavior
 
-The current live path already sends real Steam client played-state lanes. The remaining work is the hardening layer around reconnect behavior, slot updates while active, and richer operator-facing runtime diagnostics.
+The current live path already sends real Steam client played-state lanes, reconnects dropped lanes, and reapplies updated slot sets while a lane is active. The remaining work is deeper protocol coverage such as richer conflict handling, more explicit custom-status transport behavior, and broader operator diagnostics/log persistence.
 
 ## Local Development
 

@@ -312,10 +312,33 @@ class DesktopApi:
             self._config.accounts.sort(key=lambda item: item.display_name.lower())
             self._persist()
             self._sync_runtime_profiles()
+            runtime_status = self._runtime_controller.snapshot().accounts.get(updated.profile_id)
+            success_message = "Account profile saved."
+
+            if runtime_status and runtime_status.state in (
+                RuntimeState.STARTING,
+                RuntimeState.BOOSTING,
+                RuntimeState.PAUSED,
+            ):
+                if updated.games:
+                    runtime_status = self._runtime_controller.reconfigure_profile(
+                        updated.profile_id,
+                        self._config.accounts,
+                    )
+                    success_message = runtime_status.message or "Account profile saved and live lane updated."
+                else:
+                    runtime_status = self._runtime_controller.stop_profile(
+                        updated.profile_id,
+                        self._config.accounts,
+                    )
+                    success_message = (
+                        "Account profile saved and the active lane was stopped because no slots remain."
+                    )
+
             return {
                 "ok": True,
                 "status": "saved",
-                "message": "Account profile saved.",
+                "message": success_message,
                 "account": self._serialize_account(updated),
                 "state": self.get_bootstrap_state(),
             }
@@ -328,6 +351,13 @@ class DesktopApi:
             "ok": True,
             "status": "refreshed",
             "message": "Runtime readiness refreshed.",
+            "state": self.get_bootstrap_state(),
+        }
+
+    def poll_runtime_state(self) -> Dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "polled",
             "state": self.get_bootstrap_state(),
         }
 

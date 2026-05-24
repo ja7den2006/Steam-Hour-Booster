@@ -271,6 +271,49 @@ def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
     assert saved.games[0].title == "Counter-Strike 2"
 
 
+def test_save_account_profile_reconfigures_active_preview_lane(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                account_name="primary_account",
+                steam_id="7656119",
+                login_mode="credentials",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+        runtime_controller=preview_runtime_controller(session_store),
+    )
+
+    started = api.start_account_runtime("steam_7656119")
+    saved = api.save_account_profile(
+        {
+            "profile_id": "steam_7656119",
+            "display_name": "Primary",
+            "persona_state": "Away",
+            "games_text": "730: Counter-Strike 2\n570: Dota 2",
+        }
+    )
+
+    assert started["ok"] is True
+    assert saved["ok"] is True
+    assert "updated" in saved["message"].lower()
+    runtime_status = saved["state"]["runtime"]["statuses"][0]
+    assert runtime_status["state"] == "boosting"
+    assert runtime_status["active_app_ids"] == [730, 570]
+
+
 def test_save_account_profile_rejects_too_many_slots(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     session_store = SessionStore(base_dir=tmp_path / "sessions")
@@ -369,3 +412,32 @@ def test_runtime_refresh_exposes_transport_status(tmp_path) -> None:
     assert runtime_state["transport_name"] == "valvepython-steam"
     assert runtime_state["preview_mode"] is False
     assert runtime_state["counts"]["ready_accounts"] == 1
+
+
+def test_runtime_poll_returns_current_state(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                steam_id="7656119",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.poll_runtime_state()
+
+    assert result["ok"] is True
+    assert result["status"] == "polled"
+    assert result["state"]["runtime"]["counts"]["ready_accounts"] == 1
