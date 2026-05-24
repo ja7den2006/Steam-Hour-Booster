@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Steam Hour Booster</title>
+    <style>
+__INLINE_STYLES__
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="topbar__drag pywebview-drag-region" id="drag-region">
+          <div class="brand-badge">SHB</div>
+          <div class="brand-copy">
+            <div class="brand-copy__title">Steam Hour Booster</div>
+            <div class="brand-copy__subtitle">Desktop control surface</div>
+          </div>
+          <div class="topbar-pill" id="topbar-pill">Foundation build</div>
+        </div>
+        <div class="topbar__actions">
+          <button class="window-button" data-action="minimize">_</button>
+          <button class="window-button" data-action="maximize" id="maximize-button">[]</button>
+          <button class="window-button window-button--close" data-action="close">X</button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="sidebar__intro">
+            <div class="sidebar__eyebrow">CONTROL SURFACE</div>
+            <h1>Professional shell first.</h1>
+            <p>
+              The first pushed patch focuses on the branded desktop shell,
+              configuration boundaries, and auth/runtime architecture instead of
+              shipping a throwaway script UI.
+            </p>
+          </div>
+
+          <nav class="nav">
+            <button class="nav-button is-active" data-page="dashboard">
+              <span>Overview</span>
+              <small>Architecture, delivery, and posture</small>
+            </button>
+            <button class="nav-button" data-page="accounts">
+              <span>Accounts</span>
+              <small>Profile and auth onboarding</small>
+            </button>
+            <button class="nav-button" data-page="runtime">
+              <span>Runtime</span>
+              <small>Boost lanes and operational flow</small>
+            </button>
+            <button class="nav-button" data-page="settings">
+              <span>Settings</span>
+              <small>Local state and shell wiring</small>
+            </button>
+          </nav>
+
+          <section class="sidebar-card">
+            <div class="sidebar-card__title">Patch status</div>
+            <p>
+              This patch is not meant to be the final product. It establishes a
+              real host shell, the auth boundary, and the repo hygiene needed for
+              the live runtime work that follows.
+            </p>
+          </section>
+        </aside>
+
+        <main class="content">
+          <section class="page is-active" data-page="dashboard">
+            <section class="hero card reveal">
+              <div class="hero__copy">
+                <div class="eyebrow">FOUNDATION PATCH</div>
+                <h2>A custom desktop shell for a real Steam hour boosting tool.</h2>
+                <p>
+                  This build path is centered on durable account handling,
+                  professional presentation, and room for a later multi-slot
+                  runtime instead of a rushed one-shot UI.
+                </p>
+                <div class="hero__pills">
+                  <span class="pill">Credential login</span>
+                  <span class="pill">QR approval</span>
+                  <span class="pill">Steam Guard</span>
+                  <span class="pill pill--subtle">32-slot target</span>
+                </div>
+              </div>
+
+              <div class="hero__meta card card--embedded">
+                <h3>Build posture</h3>
+                <div class="meta-list">
+                  <div><span>Desktop stack</span><strong id="build-desktop-stack">Loading</strong></div>
+                  <div><span>Auth reference</span><strong id="build-auth-reference">Loading</strong></div>
+                  <div><span>Repository flow</span><strong id="build-repo-flow">Loading</strong></div>
+                  <div><span>Default branch</span><strong id="build-default-branch">Loading</strong></div>
+                  <div><span>Configured accounts</span><strong id="build-account-count">0</strong></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="stats-grid reveal reveal--delay-1">
+              <article class="card stat-card">
+                <span class="stat-card__label">Concurrent slots</span>
+                <strong class="stat-card__value">32</strong>
+                <p>Runtime work is being shaped around Steam's supported multi-app played state ceiling per account.</p>
+              </article>
+              <article class="card stat-card">
+                <span class="stat-card__label">Auth modes</span>
+                <strong class="stat-card__value">4</strong>
+                <p>Credentials, app code, email code, and QR approval are planned as first-class onboarding paths.</p>
+              </article>
+              <article class="card stat-card">
+                <span class="stat-card__label">Configured slots</span>
+                <strong class="stat-card__value" id="configured-slot-count">0</strong>
+                <p>The shell already tracks per-account game targets in config, even before the live runtime lands.</p>
+              </article>
+            </section>
+
+            <section class="three-up reveal reveal--delay-2">
+              <article class="card">
+                <h3>Authentication boundary</h3>
+                <p>UI code does not talk to raw Steam responses. The gateway wraps login, QR polling, refresh-token reuse, and session export.</p>
+                <div class="meta-list">
+                  <div><span>Credential login</span><strong>Wrapped</strong></div>
+                  <div><span>Refresh-token reuse</span><strong>Wrapped</strong></div>
+                  <div><span>QR session challenge</span><strong>Wrapped</strong></div>
+                  <div><span>Bundle export</span><strong>Wrapped</strong></div>
+                </div>
+              </article>
+              <article class="card">
+                <h3>Runtime path</h3>
+                <p>The boost engine will sit behind explicit runtime contracts instead of leaking directly into presentation code.</p>
+                <div class="meta-list">
+                  <div><span>Current state</span><strong>Contracts only</strong></div>
+                  <div><span>Next focus</span><strong>Steam client transport</strong></div>
+                  <div><span>Conflict policy</span><strong>Pause first</strong></div>
+                  <div><span>Reconnect posture</span><strong>Backoff + resume</strong></div>
+                </div>
+              </article>
+              <article class="card">
+                <h3>Local state</h3>
+                <p>Safe config, session bundles, and logs are already mapped to dedicated local folders.</p>
+                <div class="meta-list">
+                  <div><span>Config</span><strong id="path-config">Loading</strong></div>
+                  <div><span>Sessions</span><strong id="path-sessions">Loading</strong></div>
+                  <div><span>Logs</span><strong id="path-logs">Loading</strong></div>
+                </div>
+              </article>
+            </section>
+          </section>
+
+          <section class="page" data-page="accounts">
+            <section class="two-up">
+              <article class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="eyebrow">ACCOUNTS</div>
+                    <h3>Account profiles</h3>
+                  </div>
+                  <span class="pill pill--subtle" id="accounts-count-pill">0 configured</span>
+                </div>
+                <p class="card-copy">
+                  Accounts added later will live here with session status, login mode, and per-account game-slot targets.
+                </p>
+                <div class="account-list" id="account-list"></div>
+              </article>
+
+              <article class="card">
+                <div class="eyebrow">ONBOARDING MODEL</div>
+                <h3>Session-first account design</h3>
+                <p class="card-copy">
+                  Profiles are being designed around durable session reuse instead of forcing full re-auth on every launch.
+                </p>
+                <div class="meta-list">
+                  <div><span>Supported login modes</span><strong>Credentials, QR, refresh token</strong></div>
+                  <div><span>Steam Guard</span><strong>Email and app</strong></div>
+                  <div><span>Secret storage</span><strong>Outside main config</strong></div>
+                  <div><span>Per-account slots</span><strong>0 to 32 app IDs</strong></div>
+                  <div><span>Custom status slot</span><strong>Optional</strong></div>
+                </div>
+              </article>
+            </section>
+          </section>
+
+          <section class="page" data-page="runtime">
+            <section class="two-up">
+              <article class="card">
+                <div class="eyebrow">RUNTIME LANES</div>
+                <h3>Operational flow</h3>
+                <div class="lane-list">
+                  <div class="lane-row"><strong>Community auth</strong><span>Acquire or restore session state.</span></div>
+                  <div class="lane-row"><strong>Client login</strong><span>Establish Steam client connectivity.</span></div>
+                  <div class="lane-row"><strong>Played state</strong><span>Send one or more app IDs to the active session.</span></div>
+                  <div class="lane-row"><strong>Health loop</strong><span>Monitor disconnects, conflicts, and recovery.</span></div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="eyebrow">MULTI-SLOT STRATEGY</div>
+                <h3>Slot-aware runtime planning</h3>
+                <div class="meta-list">
+                  <div><span>Per-account ceiling</span><strong id="runtime-slot-ceiling">32 app IDs</strong></div>
+                  <div><span>Visible status priority</span><strong>Primary slot first</strong></div>
+                  <div><span>Conflict policy</span><strong id="runtime-conflict-policy">Loading</strong></div>
+                  <div><span>Reconnect posture</span><strong id="runtime-reconnect-posture">Loading</strong></div>
+                </div>
+              </article>
+            </section>
+
+            <article class="card card--log">
+              <div class="eyebrow">ACTIVITY CONSOLE</div>
+              <h3>Foundation runtime notes</h3>
+              <pre id="runtime-log">[foundation] runtime contracts created
+[foundation] auth boundary wrapped around SteamCommunityKit
+[next] implement Steam client transport and slot scheduler</pre>
+            </article>
+          </section>
+
+          <section class="page" data-page="settings">
+            <section class="three-up">
+              <article class="card">
+                <div class="eyebrow">CONFIGURATION</div>
+                <h3>Current shell state</h3>
+                <div class="meta-list">
+                  <div><span>Theme</span><strong id="settings-theme">Loading</strong></div>
+                  <div><span>Last page</span><strong id="settings-last-page">Loading</strong></div>
+                  <div><span>Window size</span><strong id="settings-window-size">Loading</strong></div>
+                  <div><span>Config path</span><strong id="settings-config-path">Loading</strong></div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="eyebrow">SESSION STORAGE</div>
+                <h3>Separated local runtime folders</h3>
+                <div class="meta-list">
+                  <div><span>Sessions directory</span><strong id="settings-sessions-path">Loading</strong></div>
+                  <div><span>Logs directory</span><strong id="settings-logs-path">Loading</strong></div>
+                  <div><span>Secrets in config</span><strong>No</strong></div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="eyebrow">DELIVERY DISCIPLINE</div>
+                <h3>How this repo is being built</h3>
+                <ul class="plain-list">
+                  <li>Each patch should leave the app in a usable state.</li>
+                  <li>GitHub is used as patch history, not as the main work surface.</li>
+                  <li>The shell is intentionally custom and frameless from the start.</li>
+                </ul>
+              </article>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script>
+__INLINE_SCRIPT__
+    </script>
+  </body>
+</html>

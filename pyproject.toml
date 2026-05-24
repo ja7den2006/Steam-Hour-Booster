@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "steam-hour-booster"
+version = "0.1.0"
+description = "Professional desktop Steam hour booster with SteamCommunityKit-backed authentication and a custom pywebview shell."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+  {name = "jayden"},
+]
+keywords = [
+  "steam",
+  "desktop",
+  "pyside6",
+  "steamcommunitykit",
+  "hour-booster",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Win32 (MS Windows)",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Desktop Environment",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+  "pywebview>=6.2,<7",
+  "steamcommunitykit @ git+https://github.com/ja7den2006/SteamCommunityKit.git",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0,<9",
+  "build>=1.2.2",
+]
+
+[project.scripts]
+steam-hour-booster = "steam_hour_booster.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/ja7den2006/Steam-Hour-Booster"
+Repository = "https://github.com/ja7den2006/Steam-Hour-Booster"
+Issues = "https://github.com/ja7den2006/Steam-Hour-Booster/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"steam_hour_booster.web" = ["template.html", "styles.css", "app.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
