@@ -114,6 +114,14 @@ class FakeAuthGateway:
         )
 
 
+class RecordingPathOpener:
+    def __init__(self) -> None:
+        self.paths = []
+
+    def __call__(self, path: Path) -> None:
+        self.paths.append(Path(path))
+
+
 def preview_runtime_controller(session_store: SessionStore) -> RuntimeController:
     return RuntimeController(
         session_store=session_store,
@@ -143,7 +151,10 @@ def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
     assert state["build"]["desktop_stack"] == "pywebview + HTML/CSS/JS"
     assert "Online" in state["persona_states"]
     assert any(item["value"] == "kick" for item in state["conflict_policies"])
+    assert state["paths"]["config"] == str(store.path)
+    assert state["paths"]["sessions"] == str(session_store.base_dir)
     assert state["runtime"]["event_log_path"].endswith("runtime.log")
+    assert state["paths"]["logs"] == str(Path(state["runtime"]["event_log_path"]).parent)
     assert Path(state["runtime"]["event_log_path"]).exists()
 
 
@@ -397,6 +408,59 @@ def test_runtime_controls_start_and_stop_lanes(tmp_path) -> None:
     assert stopped["state"]["runtime"]["counts"]["boosting_accounts"] == 0
     runtime_status = stopped["state"]["runtime"]["statuses"][0]
     assert runtime_status["state"] == "ready"
+
+
+def test_open_path_actions_and_snapshot_export(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {"steam_id": "7656119", "refresh_token": build_client_refresh_token("7656119")},
+    )
+    opener = RecordingPathOpener()
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                steam_id="7656119",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+        path_opener=opener,
+    )
+
+    open_config = api.open_config_file()
+    open_sessions = api.open_sessions_directory()
+    open_logs = api.open_logs_directory()
+    open_runtime_log = api.open_runtime_log_file()
+    open_bundle = api.open_account_session_bundle("steam_7656119")
+    export_snapshot = api.export_runtime_snapshot()
+
+    assert open_config["ok"] is True
+    assert Path(open_config["path"]).exists()
+    assert open_sessions["ok"] is True
+    assert Path(open_sessions["path"]).is_dir()
+    assert open_logs["ok"] is True
+    assert Path(open_logs["path"]).is_dir()
+    assert open_runtime_log["ok"] is True
+    assert Path(open_runtime_log["path"]).exists()
+    assert open_bundle["ok"] is True
+    assert Path(open_bundle["path"]) == bundle_path
+    assert export_snapshot["ok"] is True
+    assert Path(export_snapshot["path"]).exists()
+    assert len(opener.paths) == 5
+    assert opener.paths[0] == store.path
+    exported_payload = json.loads(Path(export_snapshot["path"]).read_text(encoding="utf-8"))
+    assert exported_payload["runtime"]["transport_name"] == "valvepython-steam"
+    assert exported_payload["accounts"][0]["profile_id"] == "steam_7656119"
 
 
 def test_runtime_refresh_exposes_transport_status(tmp_path) -> None:

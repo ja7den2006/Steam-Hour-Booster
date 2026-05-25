@@ -26,6 +26,7 @@ The desktop layer owns:
 - custom frameless window chrome
 - navigation, panels, page layout, and styling
 - local config editing and runtime visibility
+- desktop actions for opening local runtime assets and exporting diagnostics
 
 The shell is hosted in `pywebview` so the product can use a fully custom front-end surface without depending on the broken local Qt native bindings in the current Python 3.8 environment. It should remain independent from the live Steam runtime so it stays testable and can be iterated without touching protocol logic.
 Because the UI itself is web-based, the shell can still be moved to a different desktop host such as `Go + Wails` later without throwing away the front-end layer.
@@ -76,4 +77,5 @@ Secrets should not be written into the main config payload.
 - reconnect-aware lane telemetry surfaced back into the desktop shell
 - cached login-key reuse, conflict policy handling, and live slot/persona updates for active lanes
 - persistent runtime event logging surfaced in the shell and written to disk
+- in-app file/folder actions and runtime snapshot export for operator workflows
 - tests for config, auth mapping, session storage, and desktop bridge workflows

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from steamcommunitykit.exceptions import (
@@ -22,7 +26,6 @@ from steam_hour_booster.models import (
     AppConfig,
     IdleGame,
 )
-from steam_hour_booster.paths import config_path, logs_dir, sessions_dir
 from steam_hour_booster.runtime import RuntimeController, RuntimeState
 from steam_hour_booster.session_store import SessionStore
 
@@ -70,6 +73,7 @@ class DesktopApi:
         auth_gateway: Optional[SteamCommunityAuthGateway] = None,
         session_store: Optional[SessionStore] = None,
         runtime_controller: Optional[RuntimeController] = None,
+        path_opener: Optional[Callable[[Path], None]] = None,
     ) -> None:
         self._config_store = config_store
         self._config = config
@@ -81,6 +85,7 @@ class DesktopApi:
         self._window = None
         self._maximized = False
         self._pending_qr_logins: Dict[str, PendingQRLoginRecord] = {}
+        self._path_opener = path_opener or self._default_path_opener
         self._sync_runtime_profiles()
 
     @property
@@ -101,9 +106,9 @@ class DesktopApi:
                 "configured_slots": sum(len(account.games) for account in self._config.accounts),
             },
             "paths": {
-                "config": str(config_path()),
-                "sessions": str(sessions_dir()),
-                "logs": str(logs_dir()),
+                "config": str(self._config_store.path),
+                "sessions": str(self._session_store.base_dir),
+                "logs": str(self._runtime_log_path().parent),
             },
             "build": {
                 "desktop_stack": "pywebview + HTML/CSS/JS",
@@ -450,6 +455,76 @@ class DesktopApi:
             "state": self.get_bootstrap_state(),
         }
 
+    def open_config_file(self) -> Dict[str, Any]:
+        self._persist()
+        return self._open_runtime_path(
+            self._config_store.path,
+            success_message="Opened the config file.",
+            ensure_file=True,
+        )
+
+    def open_sessions_directory(self) -> Dict[str, Any]:
+        return self._open_runtime_path(
+            Path(self._session_store.base_dir),
+            success_message="Opened the sessions directory.",
+            ensure_directory=True,
+        )
+
+    def open_logs_directory(self) -> Dict[str, Any]:
+        return self._open_runtime_path(
+            self._runtime_log_path().parent,
+            success_message="Opened the logs directory.",
+            ensure_directory=True,
+        )
+
+    def open_runtime_log_file(self) -> Dict[str, Any]:
+        runtime_log_path = self._runtime_log_path()
+        return self._open_runtime_path(
+            runtime_log_path,
+            success_message="Opened the runtime log file.",
+            ensure_file=True,
+        )
+
+    def open_account_session_bundle(self, profile_id: str) -> Dict[str, Any]:
+        resolved_profile_id = self._normalize_required_string(profile_id, "profile id")
+        account = self._find_account_by_profile_id(resolved_profile_id)
+        if account is None:
+            return self._message_result(
+                ok=False,
+                status="not_found",
+                message="That account profile was not found.",
+            )
+        if not account.session_bundle_path:
+            return self._message_result(
+                ok=False,
+                status="missing",
+                message="This account does not have a saved session bundle path.",
+            )
+        return self._open_runtime_path(
+            Path(account.session_bundle_path),
+            success_message="Opened the session bundle file.",
+            ensure_file=False,
+        )
+
+    def export_runtime_snapshot(self) -> Dict[str, Any]:
+        snapshot = self._runtime_controller.snapshot().to_dict()
+        export_dir = self._runtime_log_path().parent
+        export_dir.mkdir(parents=True, exist_ok=True)
+        export_path = export_dir / ("runtime-snapshot-%s.json" % datetime.now().strftime("%Y%m%d-%H%M%S"))
+        payload = {
+            "exported_at": datetime.now().isoformat(timespec="seconds"),
+            "runtime": snapshot,
+            "accounts": [self._serialize_account(account) for account in self._config.accounts],
+        }
+        export_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return {
+            "ok": True,
+            "status": "exported",
+            "message": "Exported the runtime snapshot.",
+            "path": str(export_path),
+            "state": self.get_bootstrap_state(),
+        }
+
     def minimize_window(self) -> Dict[str, Any]:
         if self._window is not None:
             self._window.minimize()
@@ -501,6 +576,51 @@ class DesktopApi:
 
     def _sync_runtime_profiles(self, *, reason: str = "") -> None:
         self._runtime_controller.refresh_accounts(self._config.accounts, reason=reason)
+
+    def _runtime_log_path(self) -> Path:
+        snapshot = self._runtime_controller.snapshot().to_dict()
+        runtime_log_path = str(snapshot.get("event_log_path", "") or "").strip()
+        if runtime_log_path:
+            return Path(runtime_log_path)
+        return Path(self._session_store.base_dir).parent / "logs" / "runtime.log"
+
+    def _open_runtime_path(
+        self,
+        target: Path,
+        *,
+        success_message: str,
+        ensure_directory: bool = False,
+        ensure_file: bool = False,
+    ) -> Dict[str, Any]:
+        resolved_target = Path(target)
+        try:
+            if ensure_directory:
+                resolved_target.mkdir(parents=True, exist_ok=True)
+            elif ensure_file:
+                resolved_target.parent.mkdir(parents=True, exist_ok=True)
+                if not resolved_target.exists():
+                    resolved_target.write_text("", encoding="utf-8")
+            self._path_opener(resolved_target)
+        except Exception as exc:
+            return self._error_result(exc)
+        return {
+            "ok": True,
+            "status": "opened",
+            "message": success_message,
+            "path": str(resolved_target),
+            "state": self.get_bootstrap_state(),
+        }
+
+    @staticmethod
+    def _default_path_opener(target: Path) -> None:
+        resolved_target = Path(target)
+        if hasattr(os, "startfile"):
+            os.startfile(str(resolved_target))
+            return
+        if os.name == "nt":
+            subprocess.Popen(["explorer", str(resolved_target)])
+            return
+        raise RuntimeError("Opening local paths is not supported on this platform.")
 
     def _upsert_authenticated_account(
         self,

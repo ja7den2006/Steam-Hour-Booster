@@ -70,6 +70,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindAuthModes();
   bindAccountActions();
   bindRuntimeActions();
+  bindSettingsActions();
   await waitForBridge();
   await hydrate();
   startRuntimePolling();
@@ -248,6 +249,11 @@ function bindAccountActions() {
   if (saveButton) {
     saveButton.addEventListener('click', saveAccountProfile);
   }
+
+  const openSessionButton = document.getElementById('editor-open-session-button');
+  if (openSessionButton) {
+    openSessionButton.addEventListener('click', openSelectedSessionBundle);
+  }
 }
 
 function bindRuntimeActions() {
@@ -285,6 +291,38 @@ function bindRuntimeActions() {
   const stopAllButton = document.getElementById('runtime-stop-all-button');
   if (stopAllButton) {
     stopAllButton.addEventListener('click', stopAllRuntimeLanes);
+  }
+
+  const openLogButton = document.getElementById('runtime-open-log-button');
+  if (openLogButton) {
+    openLogButton.addEventListener('click', openRuntimeLogFile);
+  }
+
+  const openLogsButton = document.getElementById('runtime-open-logs-button');
+  if (openLogsButton) {
+    openLogsButton.addEventListener('click', openLogsDirectoryFromRuntime);
+  }
+
+  const exportSnapshotButton = document.getElementById('runtime-export-snapshot-button');
+  if (exportSnapshotButton) {
+    exportSnapshotButton.addEventListener('click', exportRuntimeSnapshot);
+  }
+}
+
+function bindSettingsActions() {
+  const openConfigButton = document.getElementById('settings-open-config-button');
+  if (openConfigButton) {
+    openConfigButton.addEventListener('click', openConfigFile);
+  }
+
+  const openSessionsButton = document.getElementById('settings-open-sessions-button');
+  if (openSessionsButton) {
+    openSessionsButton.addEventListener('click', openSessionsDirectory);
+  }
+
+  const openLogsButton = document.getElementById('settings-open-logs-button');
+  if (openLogsButton) {
+    openLogsButton.addEventListener('click', openLogsDirectoryFromSettings);
   }
 }
 
@@ -736,6 +774,8 @@ async function handleMutationResult(result, options = {}) {
       setEditorStatus('error', result?.message || 'The request failed.');
     } else if (options.target === 'runtime') {
       setRuntimeStatus('error', result?.message || 'The request failed.');
+    } else if (options.target === 'settings') {
+      setSettingsStatus('error', result?.message || 'The request failed.');
     } else {
       setAuthStatus('error', result?.message || 'The request failed.');
     }
@@ -759,6 +799,8 @@ async function handleMutationResult(result, options = {}) {
     setEditorStatus('success', options.successMessage || result.message || 'Saved.');
   } else if (options.target === 'runtime') {
     setRuntimeStatus('success', options.successMessage || result.message || 'Saved.');
+  } else if (options.target === 'settings') {
+    setSettingsStatus('success', options.successMessage || result.message || 'Saved.');
   } else {
     setAuthStatus('success', options.successMessage || result.message || 'Saved.');
   }
@@ -791,6 +833,18 @@ function setEditorStatus(kind, message) {
 
 function setRuntimeStatus(kind, message) {
   const banner = document.getElementById('runtime-status');
+  if (!banner) {
+    return;
+  }
+  banner.textContent = message || '';
+  banner.className = `status-banner status-banner--${kind}`;
+  if (!message) {
+    banner.classList.add('status-banner--hidden');
+  }
+}
+
+function setSettingsStatus(kind, message) {
+  const banner = document.getElementById('settings-status');
   if (!banner) {
     return;
   }
@@ -901,6 +955,22 @@ async function saveAccountProfile() {
   setButtonBusy('account-save-button', false, 'Save Account Settings');
 }
 
+async function openSelectedSessionBundle() {
+  const profile = getSelectedAccount();
+  if (!profile) {
+    setEditorStatus('error', 'Select an account first.');
+    return;
+  }
+
+  setEditorStatus('info', 'Opening the saved session bundle.');
+  const result = await callApi('open_account_session_bundle', profile.profile_id);
+  await handleMutationResult(result, {
+    target: 'editor',
+    successMessage: result?.message || 'Opened the session bundle.',
+    selectProfileId: profile.profile_id,
+  });
+}
+
 async function refreshRuntimeReadiness() {
   setButtonBusy('runtime-refresh-button', true, 'Refreshing...');
   setRuntimeStatus('info', 'Refreshing runtime readiness from saved account state.');
@@ -949,6 +1019,62 @@ async function stopRuntimeLane(profileId) {
   await handleMutationResult(result, {
     target: 'runtime',
     successMessage: result?.message || 'Boost lane stopped.',
+  });
+}
+
+async function openRuntimeLogFile() {
+  setRuntimeStatus('info', 'Opening the runtime log file.');
+  const result = await callApi('open_runtime_log_file');
+  await handleMutationResult(result, {
+    target: 'runtime',
+    successMessage: result?.message || 'Opened the runtime log file.',
+  });
+}
+
+async function openLogsDirectoryFromRuntime() {
+  setRuntimeStatus('info', 'Opening the logs directory.');
+  const result = await callApi('open_logs_directory');
+  await handleMutationResult(result, {
+    target: 'runtime',
+    successMessage: result?.message || 'Opened the logs directory.',
+  });
+}
+
+async function exportRuntimeSnapshot() {
+  setButtonBusy('runtime-export-snapshot-button', true, 'Exporting...');
+  setRuntimeStatus('info', 'Exporting the current runtime snapshot.');
+  const result = await callApi('export_runtime_snapshot');
+  await handleMutationResult(result, {
+    target: 'runtime',
+    successMessage: result?.path ? `Exported runtime snapshot to ${result.path}` : (result?.message || 'Exported the runtime snapshot.'),
+  });
+  setButtonBusy('runtime-export-snapshot-button', false, 'Export Snapshot');
+}
+
+async function openConfigFile() {
+  setSettingsStatus('info', 'Opening the config file.');
+  const result = await callApi('open_config_file');
+  await handleMutationResult(result, {
+    target: 'settings',
+    successMessage: result?.message || 'Opened the config file.',
+  });
+}
+
+async function openSessionsDirectory() {
+  setSettingsStatus('info', 'Opening the sessions directory.');
+  const result = await callApi('open_sessions_directory');
+  await handleMutationResult(result, {
+    target: 'settings',
+    successMessage: result?.message || 'Opened the sessions directory.',
+  });
+}
+
+async function openLogsDirectoryFromSettings() {
+  setSettingsStatus('info', 'Opening the logs directory.');
+  const result = await callApi('open_logs_directory');
+  await handleMutationResult(result, {
+    target: 'settings',
+    successMessage: result?.message || 'Opened the logs directory.',
   });
 }
 

@@ -411,6 +411,14 @@ textarea {
   gap: 16px;
 }
 
+.card-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .account-list {
   margin-top: 18px;
   display: flex;

@@ -47,6 +47,8 @@ The current repository state now covers the shell, auth boundary, and a live Ste
 - live lane reconfiguration for slot and persona changes without forcing a full stop/start cycle
 - per-account conflict handling with pause or force-kick policy
 - persistent runtime event logging under local app data
+- in-app desktop actions for opening config, sessions, logs, and saved session bundles
+- runtime snapshot export from the shell for operator diagnostics
 - operator-facing runtime telemetry for auth source, reconnect count, and last runtime issue
 - test coverage for config, auth mapping, session storage, and desktop bridge behavior
 

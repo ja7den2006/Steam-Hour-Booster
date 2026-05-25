@@ -372,6 +372,7 @@ __INLINE_STYLES__
                         <div class="eyebrow">SESSION BUNDLE</div>
                         <h3>Saved bundle metadata</h3>
                       </div>
+                      <button class="ghost-button" id="editor-open-session-button">Open Bundle</button>
                     </div>
                     <div class="meta-list">
                       <div><span>Bundle file</span><strong id="editor-session-path">Loading</strong></div>
@@ -479,8 +480,17 @@ __INLINE_STYLES__
             </article>
 
             <article class="card card--log">
-              <div class="eyebrow">ACTIVITY CONSOLE</div>
-              <h3>Runtime controller log</h3>
+              <div class="card-header">
+                <div>
+                  <div class="eyebrow">ACTIVITY CONSOLE</div>
+                  <h3>Runtime controller log</h3>
+                </div>
+                <div class="card-header__actions">
+                  <button class="ghost-button" id="runtime-open-log-button">Open Log</button>
+                  <button class="ghost-button" id="runtime-open-logs-button">Open Logs</button>
+                  <button class="secondary-button" id="runtime-export-snapshot-button">Export Snapshot</button>
+                </div>
+              </div>
               <div class="meta-list">
                 <div><span>Log file</span><strong id="runtime-log-path">Loading</strong></div>
                 <div><span>Captured events</span><strong id="runtime-event-count">0</strong></div>
@@ -492,6 +502,7 @@ __INLINE_STYLES__
           </section>
 
           <section class="page" data-page="settings">
+            <div class="status-banner status-banner--hidden" id="settings-status"></div>
             <section class="three-up">
               <article class="card">
                 <div class="eyebrow">CONFIGURATION</div>
@@ -501,6 +512,9 @@ __INLINE_STYLES__
                   <div><span>Last page</span><strong id="settings-last-page">Loading</strong></div>
                   <div><span>Window size</span><strong id="settings-window-size">Loading</strong></div>
                   <div><span>Config path</span><strong id="settings-config-path">Loading</strong></div>
+                </div>
+                <div class="form-actions">
+                  <button class="action-button" id="settings-open-config-button">Open Config</button>
                 </div>
               </article>
 
@@ -512,6 +526,10 @@ __INLINE_STYLES__
                   <div><span>Logs directory</span><strong id="settings-logs-path">Loading</strong></div>
                   <div><span>Runtime log file</span><strong id="settings-runtime-log-path">Loading</strong></div>
                   <div><span>Secrets in config</span><strong>No</strong></div>
+                </div>
+                <div class="form-actions">
+                  <button class="action-button" id="settings-open-sessions-button">Open Sessions</button>
+                  <button class="secondary-button" id="settings-open-logs-button">Open Logs</button>
                 </div>
               </article>
 
