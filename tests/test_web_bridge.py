@@ -123,6 +123,7 @@ def preview_runtime_controller(session_store: SessionStore) -> RuntimeController
 
 def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
     config = AppConfig(
         accounts=[
             AccountProfile(
@@ -133,7 +134,7 @@ def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
             )
         ]
     )
-    api = DesktopApi(config_store=store, config=config)
+    api = DesktopApi(config_store=store, config=config, session_store=session_store)
 
     state = api.get_bootstrap_state()
 
@@ -142,6 +143,8 @@ def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
     assert state["build"]["desktop_stack"] == "pywebview + HTML/CSS/JS"
     assert "Online" in state["persona_states"]
     assert any(item["value"] == "kick" for item in state["conflict_policies"])
+    assert state["runtime"]["event_log_path"].endswith("runtime.log")
+    assert Path(state["runtime"]["event_log_path"]).exists()
 
 
 def test_window_actions_call_host_methods(tmp_path) -> None:

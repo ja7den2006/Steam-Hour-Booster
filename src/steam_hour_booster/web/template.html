@@ -130,11 +130,11 @@ __INLINE_STYLES__
               </article>
               <article class="card">
                 <h3>Runtime path</h3>
-                <p>The boost engine will sit behind explicit runtime contracts instead of leaking directly into presentation code.</p>
+                <p>The boost engine now runs behind explicit runtime contracts with persistent diagnostics and live lane telemetry.</p>
                 <div class="meta-list">
                   <div><span>Current state</span><strong>Controller + live client transport</strong></div>
-                  <div><span>Next focus</span><strong>Reconnect and live update telemetry</strong></div>
-                  <div><span>Conflict policy</span><strong>Pause first</strong></div>
+                  <div><span>Conflict handling</span><strong>Pause or force-kick</strong></div>
+                  <div><span>Diagnostics</span><strong>Persistent runtime event log</strong></div>
                   <div><span>Reconnect posture</span><strong>Backoff + resume</strong></div>
                 </div>
               </article>
@@ -161,7 +161,7 @@ __INLINE_STYLES__
                   <span class="pill pill--subtle" id="accounts-count-pill">0 configured</span>
                 </div>
                 <p class="card-copy">
-                  Signed-in accounts appear here with their session persistence status, login method, and later their game-slot targets.
+                  Signed-in accounts appear here with their session persistence status, login method, game-slot targets, and conflict posture.
                 </p>
                 <div class="account-list" id="account-list"></div>
               </article>
@@ -281,13 +281,13 @@ __INLINE_STYLES__
               </article>
 
               <article class="card">
-                <div class="eyebrow">NEXT RUNTIME HOOKS</div>
-                <h3>What this unlocks</h3>
+                <div class="eyebrow">OPERATIONAL COVERAGE</div>
+                <h3>What the current build already handles</h3>
                 <ul class="plain-list">
                   <li>Real account onboarding through the desktop shell.</li>
                   <li>Per-account session bundle persistence under local app data.</li>
                   <li>QR login approval flow without terminal prompts.</li>
-                  <li>A clean handoff into the live Steam client boosting runtime.</li>
+                  <li>A live Steam client runtime with conflict handling and persistent event logging.</li>
                 </ul>
               </article>
             </section>
@@ -425,7 +425,7 @@ __INLINE_STYLES__
                 <span class="pill pill--subtle" id="runtime-mode-pill">Steam client transport</span>
               </div>
               <p class="card-copy">
-                Saved session bundles are resolved at startup and each account is classified before a boost lane can start. The runtime controller now hands ready accounts into the live Steam client transport while keeping the shell independent from protocol logic.
+                Saved session bundles are resolved at startup and each account is classified before a boost lane can start. The runtime controller now hands ready accounts into the live Steam client transport, tracks lane transitions, and persists operator-visible events to disk.
               </p>
 
               <div class="status-banner status-banner--hidden" id="runtime-status"></div>
@@ -481,9 +481,13 @@ __INLINE_STYLES__
             <article class="card card--log">
               <div class="eyebrow">ACTIVITY CONSOLE</div>
               <h3>Runtime controller log</h3>
+              <div class="meta-list">
+                <div><span>Log file</span><strong id="runtime-log-path">Loading</strong></div>
+                <div><span>Captured events</span><strong id="runtime-event-count">0</strong></div>
+              </div>
               <pre id="runtime-log">[runtime] runtime controller initialized
-[runtime] Steam client transport available
-[next] runtime telemetry and reconnect hardening active</pre>
+[runtime] persistent event log active
+[runtime] waiting for live runtime activity</pre>
             </article>
           </section>
 
@@ -506,6 +510,7 @@ __INLINE_STYLES__
                 <div class="meta-list">
                   <div><span>Sessions directory</span><strong id="settings-sessions-path">Loading</strong></div>
                   <div><span>Logs directory</span><strong id="settings-logs-path">Loading</strong></div>
+                  <div><span>Runtime log file</span><strong id="settings-runtime-log-path">Loading</strong></div>
                   <div><span>Secrets in config</span><strong>No</strong></div>
                 </div>
               </article>

@@ -48,8 +48,9 @@ The boost runtime now sits behind internal contracts so the desktop shell stays 
 
 - account session startup
 - concurrent game-slot play state
-- pause/resume behavior
+- pause, resume, and conflict handling behavior
 - reconnect, retry, and live lane reconfiguration logic
+- persistent runtime event logging
 
 ## Local State
 
@@ -73,5 +74,6 @@ Secrets should not be written into the main config payload.
 - startup runtime readiness classification and per-account lane state
 - desktop runtime controls backed by a live Steam client transport
 - reconnect-aware lane telemetry surfaced back into the desktop shell
-- cached login-key reuse and live slot/persona updates for active lanes
+- cached login-key reuse, conflict policy handling, and live slot/persona updates for active lanes
+- persistent runtime event logging surfaced in the shell and written to disk
 - tests for config, auth mapping, session storage, and desktop bridge workflows

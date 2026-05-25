@@ -120,6 +120,8 @@ class RuntimeSnapshot:
     accounts: Dict[str, AccountRuntimeStatus] = field(default_factory=dict)
     transport_name: str = "local-preview"
     preview_mode: bool = True
+    event_log_path: str = ""
+    event_count: int = 0
     recent_events: List[str] = field(default_factory=list)
     updated_at: str = ""
 
@@ -140,6 +142,8 @@ class RuntimeSnapshot:
         return {
             "transport_name": self.transport_name,
             "preview_mode": self.preview_mode,
+            "event_log_path": self.event_log_path,
+            "event_count": self.event_count,
             "updated_at": self.updated_at,
             "counts": {
                 "tracked_accounts": len(statuses),
@@ -960,13 +964,18 @@ class RuntimeController:
         session_store: Optional[SessionStore] = None,
         transport: Optional[BoosterRuntime] = None,
         event_limit: int = 60,
+        event_log_path: Optional[Path] = None,
     ) -> None:
         self._session_store = session_store or SessionStore()
         self._transport = transport or build_default_transport(self._session_store)
         self._event_limit = max(10, int(event_limit))
+        default_event_log_path = Path(self._session_store.base_dir).parent / "logs" / "runtime.log"
+        self._event_log_path = Path(event_log_path) if event_log_path is not None else default_event_log_path
+        self._event_log_lock = threading.Lock()
         self._snapshot = RuntimeSnapshot(
             transport_name=self._transport.name,
             preview_mode=bool(self._transport.preview_mode),
+            event_log_path=str(self._event_log_path),
             updated_at=_iso_timestamp(),
         )
         self._log_event("Runtime controller initialized with %s transport." % self._transport.name)
@@ -1275,6 +1284,11 @@ class RuntimeController:
             status = self._snapshot.accounts.get(profile_id)
             if status is None:
                 continue
+            previous_state = status.state
+            previous_blocked = status.blocked_by_playing_session
+            previous_reconnect_attempts = status.reconnect_attempts
+            previous_active_slot_count = len(status.active_app_ids)
+            previous_last_error = status.last_error
             status.state = telemetry.state
             status.active_app_ids = list(telemetry.active_app_ids)
             status.auth_source = telemetry.auth_source
@@ -1286,15 +1300,81 @@ class RuntimeController:
             status.last_error = telemetry.last_error
             status.message = telemetry.message or status.message
             status.updated_at = telemetry.updated_at or _iso_timestamp()
+            self._log_transport_transition(
+                status=status,
+                previous_state=previous_state,
+                previous_blocked=previous_blocked,
+                previous_reconnect_attempts=previous_reconnect_attempts,
+                previous_active_slot_count=previous_active_slot_count,
+                previous_last_error=previous_last_error,
+            )
         self._touch_snapshot()
 
     def _touch_snapshot(self) -> None:
         self._snapshot.transport_name = self._transport.name
         self._snapshot.preview_mode = bool(self._transport.preview_mode)
+        self._snapshot.event_log_path = str(self._event_log_path)
         self._snapshot.updated_at = _iso_timestamp()
 
     def _log_event(self, message: str) -> None:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self._snapshot.recent_events.append("[%s] %s" % (timestamp, message))
+        short_timestamp = datetime.now().strftime("%H:%M:%S")
+        full_timestamp = datetime.now().isoformat(timespec="seconds")
+        self._snapshot.recent_events.append("[%s] %s" % (short_timestamp, message))
         self._snapshot.recent_events = self._snapshot.recent_events[-self._event_limit :]
+        self._snapshot.event_count += 1
+        self._append_event_to_log("[%s] %s" % (full_timestamp, message))
         self._touch_snapshot()
+
+    def _append_event_to_log(self, line: str) -> None:
+        self._event_log_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._event_log_lock:
+            with self._event_log_path.open("a", encoding="utf-8") as handle:
+                handle.write("%s\n" % line)
+
+    def _log_transport_transition(
+        self,
+        *,
+        status: AccountRuntimeStatus,
+        previous_state: RuntimeState,
+        previous_blocked: bool,
+        previous_reconnect_attempts: int,
+        previous_active_slot_count: int,
+        previous_last_error: str,
+    ) -> None:
+        if status.state != previous_state:
+            self._log_event(
+                "%s transitioned to %s."
+                % (status.display_name, status.state.value.replace("_", " "))
+            )
+
+        if status.blocked_by_playing_session and not previous_blocked:
+            blocked_fragment = (
+                " on app %s" % status.blocked_app_id
+                if status.blocked_app_id > 0
+                else ""
+            )
+            self._log_event(
+                "Playing session conflict detected for %s%s."
+                % (status.display_name, blocked_fragment)
+            )
+        elif previous_blocked and not status.blocked_by_playing_session:
+            self._log_event("Playing session conflict cleared for %s." % status.display_name)
+
+        if status.reconnect_attempts > previous_reconnect_attempts:
+            self._log_event(
+                "%s queued reconnect attempt %s."
+                % (status.display_name, status.reconnect_attempts)
+            )
+
+        if status.last_error and status.last_error != previous_last_error:
+            self._log_event("%s reported: %s" % (status.display_name, status.last_error))
+
+        if len(status.active_app_ids) != previous_active_slot_count and status.active_app_ids:
+            self._log_event(
+                "%s now has %s active slot%s."
+                % (
+                    status.display_name,
+                    len(status.active_app_ids),
+                    "" if len(status.active_app_ids) == 1 else "s",
+                )
+            )

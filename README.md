@@ -45,10 +45,12 @@ The current repository state now covers the shell, auth boundary, and a live Ste
 - cached login-key reuse after a successful client session
 - reconnect/backoff handling for dropped live lanes
 - live lane reconfiguration for slot and persona changes without forcing a full stop/start cycle
+- per-account conflict handling with pause or force-kick policy
+- persistent runtime event logging under local app data
 - operator-facing runtime telemetry for auth source, reconnect count, and last runtime issue
 - test coverage for config, auth mapping, session storage, and desktop bridge behavior
 
-The current live path already sends real Steam client played-state lanes, reconnects dropped lanes, and reapplies updated slot sets while a lane is active. The remaining work is deeper protocol coverage such as richer conflict handling, more explicit custom-status transport behavior, and broader operator diagnostics/log persistence.
+The current live path already sends real Steam client played-state lanes, reconnects dropped lanes, reuses cached login keys, enforces conflict policy, and persists an operator-visible runtime log while a lane is active. The remaining work is broader protocol breadth such as more explicit custom-status transport behavior, tray/packaging polish, and deeper release shaping.
 
 ## Local Development
 

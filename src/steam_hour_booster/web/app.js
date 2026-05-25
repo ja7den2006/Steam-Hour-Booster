@@ -32,6 +32,8 @@ const fallbackState = {
     reconnect_posture: 'Backoff and resume',
     transport_name: 'valvepython-steam',
     preview_mode: false,
+    event_log_path: 'Loading',
+    event_count: 3,
     counts: {
       tracked_accounts: 0,
       ready_accounts: 0,
@@ -44,8 +46,8 @@ const fallbackState = {
     statuses: [],
     recent_events: [
       '[runtime] runtime controller initialized',
-      '[runtime] Steam client transport available',
-      '[next] runtime telemetry and reconnect hardening active',
+      '[runtime] persistent event log active',
+      '[runtime] waiting for live runtime activity',
     ],
   },
 };
@@ -428,6 +430,8 @@ function fillRuntime() {
   setText('runtime-transport-name', runtime.transport_name || 'Unknown');
   setText('runtime-accounts-pill', `${runtime.counts?.tracked_accounts || 0} tracked`);
   setText('runtime-mode-pill', runtime.preview_mode ? 'Preview transport' : 'Live transport');
+  setText('runtime-log-path', runtime.event_log_path || 'Unavailable');
+  setText('runtime-event-count', String(runtime.event_count || 0));
   fillRuntimeAccounts(runtime.statuses || []);
 
   const log = document.getElementById('runtime-log');
@@ -436,8 +440,8 @@ function fillRuntime() {
       ? runtime.recent_events
       : [
           '[runtime] runtime controller initialized',
-          '[runtime] Steam client transport available',
-          '[next] runtime telemetry and reconnect hardening active',
+          '[runtime] persistent event log active',
+          '[runtime] waiting for live runtime activity',
         ];
     log.textContent = lines.join('\n');
   }
@@ -518,6 +522,7 @@ function fillSettings() {
   setText('settings-config-path', state.paths.config);
   setText('settings-sessions-path', state.paths.sessions);
   setText('settings-logs-path', state.paths.logs);
+  setText('settings-runtime-log-path', state.runtime?.event_log_path || 'Unavailable');
 }
 
 function updateWindowButtons() {

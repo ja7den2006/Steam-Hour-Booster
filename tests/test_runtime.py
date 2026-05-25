@@ -51,6 +51,35 @@ def test_runtime_controller_marks_ready_accounts_from_saved_sessions(tmp_path) -
     assert status["configured_slot_count"] == 2
 
 
+def test_runtime_controller_persists_event_log_to_disk(tmp_path) -> None:
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    log_path = tmp_path / "logs" / "runtime.log"
+    controller = RuntimeController(
+        session_store=session_store,
+        transport=PreviewBoosterRuntime(),
+        event_log_path=log_path,
+    )
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        steam_id="7656119",
+        session_bundle_path=str(bundle_path),
+        games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+    )
+
+    controller.refresh_accounts([account], reason="manual refresh")
+    controller.start_profile("steam_7656119", [account])
+    snapshot = controller.snapshot().to_dict()
+    log_contents = log_path.read_text(encoding="utf-8")
+
+    assert log_path.exists() is True
+    assert snapshot["event_log_path"] == str(log_path)
+    assert snapshot["event_count"] >= 3
+    assert "Runtime controller initialized" in log_contents
+    assert "Started Primary with 2 slots." in log_contents
+
+
 def test_runtime_controller_starts_and_stops_preview_lane(tmp_path) -> None:
     session_store = SessionStore(base_dir=tmp_path / "sessions")
     bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
