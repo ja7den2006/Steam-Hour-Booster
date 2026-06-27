@@ -809,6 +809,10 @@ textarea {
   margin-top: 4px;
 }
 
+.editor-library {
+  margin-top: 16px;
+}
+
 .game-slot-panel {
   display: flex;
   flex-direction: column;

@@ -486,6 +486,24 @@ __INLINE_STYLES__
                     </div>
                   </div>
 
+                  <div class="editor-library card card--embedded">
+                    <div class="card-header">
+                      <div>
+                        <div class="eyebrow">OWNED-GAME VALIDATION</div>
+                        <h3>Library integrity check</h3>
+                      </div>
+                      <span class="runtime-state runtime-state--idle" id="editor-library-status">Pending</span>
+                    </div>
+                    <div class="meta-list">
+                      <div><span>Last check</span><strong id="editor-library-checked-at">Not checked yet</strong></div>
+                      <div><span>Web API key</span><strong id="editor-library-api-key">Unknown</strong></div>
+                      <div><span>Missing app IDs</span><strong id="editor-library-missing">None</strong></div>
+                    </div>
+                    <p class="card-copy" id="editor-library-message">
+                      The runtime controller will validate configured app IDs against the owned-games API when enough community web credentials are available.
+                    </p>
+                  </div>
+
                   <div class="form-actions">
                     <button class="action-button" id="account-save-button">Save Account Settings</button>
                     <p class="helper-copy">Visible presence applies only when online boosting is enabled. Turning that off forces the runtime to stay invisible.</p>
@@ -558,8 +576,20 @@ __INLINE_STYLES__
                   <strong id="runtime-blocked-count">0</strong>
                 </div>
                 <div>
+                  <span>Library blocked</span>
+                  <strong id="runtime-validation-blocked-count">0</strong>
+                </div>
+                <div>
+                  <span>Validation unavailable</span>
+                  <strong id="runtime-validation-unavailable-count">0</strong>
+                </div>
+                <div>
                   <span>Active slots</span>
                   <strong id="runtime-active-slot-count">0</strong>
+                </div>
+                <div>
+                  <span>Library verified</span>
+                  <strong id="runtime-validation-verified-count">0</strong>
                 </div>
                 <div>
                   <span>Transport</span>

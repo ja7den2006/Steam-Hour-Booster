@@ -43,6 +43,9 @@ const fallbackState = {
       paused_accounts: 0,
       blocked_accounts: 0,
       error_accounts: 0,
+      library_validation_blocked_accounts: 0,
+      library_validation_unavailable_accounts: 0,
+      library_validation_verified_accounts: 0,
       active_slots: 0,
     },
     statuses: [],
@@ -450,6 +453,7 @@ function fillAccountEditor() {
   const editorShell = document.getElementById('account-editor-shell');
   const editorEmpty = document.getElementById('account-editor-empty');
   const profile = getSelectedAccount();
+  const runtimeStatus = getSelectedRuntimeStatus();
 
   hydratePersonaOptions();
   hydrateConflictPolicyOptions();
@@ -468,6 +472,7 @@ function fillAccountEditor() {
     renderEditorGames();
     setChecked('editor-auto-reply-enabled', false);
     updateAutoReplyEditorState();
+    fillEditorLibraryValidation(null);
     return;
   }
 
@@ -516,6 +521,38 @@ function fillAccountEditor() {
   setText('editor-session-refresh', sessionSummary.has_refresh_token ? 'Available' : 'Missing');
   setText('editor-session-access', sessionSummary.has_access_token ? 'Available' : 'Missing');
   setText('editor-session-id', sessionSummary.has_session_id ? 'Available' : 'Missing');
+  fillEditorLibraryValidation(runtimeStatus);
+}
+
+function fillEditorLibraryValidation(status) {
+  const badge = document.getElementById('editor-library-status');
+  if (badge) {
+    badge.textContent = status?.owned_games_validation_label || formatOwnedGamesValidationState(status?.owned_games_validation_state);
+    badge.className = `runtime-state runtime-state--${formatOwnedGamesValidationClass(status?.owned_games_validation_state)}`;
+  }
+
+  setText(
+    'editor-library-checked-at',
+    status?.owned_games_validation_checked_at
+      ? formatRuntimeTimestamp(status.owned_games_validation_checked_at)
+      : 'Not checked yet',
+  );
+  setText(
+    'editor-library-api-key',
+    status
+      ? (status.owned_games_api_key_available ? 'Available' : 'Unavailable')
+      : 'Unknown',
+  );
+  setText(
+    'editor-library-missing',
+    Array.isArray(status?.owned_games_missing_app_ids) && status.owned_games_missing_app_ids.length
+      ? status.owned_games_missing_app_ids.join(', ')
+      : 'None',
+  );
+  setText(
+    'editor-library-message',
+    formatOwnedGamesValidationDetail(status),
+  );
 }
 
 function fillRuntime() {
@@ -527,7 +564,10 @@ function fillRuntime() {
   setText('runtime-boosting-count', String(runtime.counts?.boosting_accounts || 0));
   setText('runtime-paused-count', String(runtime.counts?.paused_accounts || 0));
   setText('runtime-blocked-count', String(runtime.counts?.blocked_accounts || 0));
+  setText('runtime-validation-blocked-count', String(runtime.counts?.library_validation_blocked_accounts || 0));
+  setText('runtime-validation-unavailable-count', String(runtime.counts?.library_validation_unavailable_accounts || 0));
   setText('runtime-active-slot-count', String(runtime.counts?.active_slots || 0));
+  setText('runtime-validation-verified-count', String(runtime.counts?.library_validation_verified_accounts || 0));
   setText('runtime-transport-name', runtime.transport_name || 'Unknown');
   setText('runtime-accounts-pill', `${runtime.counts?.tracked_accounts || 0} tracked`);
   setText('runtime-mode-pill', runtime.preview_mode ? 'Preview transport' : 'Live transport');
@@ -611,11 +651,17 @@ function fillRuntimeAccounts(statuses) {
           <span>Reconnects</span>
           <strong>${Number(status.reconnect_attempts || 0)}</strong>
         </div>
+        <div>
+          <span>Library</span>
+          <strong>${escapeHtml(status.owned_games_validation_label || formatOwnedGamesValidationState(status.owned_games_validation_state))}</strong>
+        </div>
       </div>
       <div class="runtime-account__message">${escapeHtml(status.message || 'No runtime message available.')}</div>
       <div class="runtime-account__details">
         <div class="runtime-account__detail"><strong>Connected:</strong> ${escapeHtml(formatRuntimeTimestamp(status.connected_at))}</div>
+        <div class="runtime-account__detail"><strong>Owned games:</strong> ${escapeHtml(formatOwnedGamesValidationDetail(status))}</div>
         ${status.auto_reply_enabled ? `<div class="runtime-account__detail"><strong>Auto-reply:</strong> ${escapeHtml(formatAutoReplySummary(status))}</div>` : ''}
+        ${Array.isArray(status.owned_games_missing_app_ids) && status.owned_games_missing_app_ids.length ? `<div class="runtime-account__detail"><strong>Missing app IDs:</strong> ${escapeHtml(status.owned_games_missing_app_ids.join(', '))}</div>` : ''}
         ${status.blocked_by_playing_session ? `<div class="runtime-account__detail"><strong>Blocked app:</strong> ${escapeHtml(formatBlockedApp(status.blocked_app_id))}</div>` : ''}
         ${status.last_error ? `<div class="runtime-account__detail"><strong>Last issue:</strong> ${escapeHtml(status.last_error)}</div>` : ''}
       </div>
@@ -1155,6 +1201,12 @@ function getSelectedAccount() {
   ) || null;
 }
 
+function getSelectedRuntimeStatus() {
+  return (shellState.bootstrap.runtime?.statuses || []).find(
+    (status) => status.profile_id === shellState.selectedAccountProfileId,
+  ) || null;
+}
+
 async function saveAccountProfile() {
   const profile = getSelectedAccount();
   if (!profile) {
@@ -1374,6 +1426,50 @@ function formatBlockedApp(appId) {
     return 'Another active session';
   }
   return `App ${numericId}`;
+}
+
+function formatOwnedGamesValidationState(state) {
+  if (state === 'valid') {
+    return 'Verified';
+  }
+  if (state === 'invalid') {
+    return 'Blocked';
+  }
+  if (state === 'unavailable') {
+    return 'Unavailable';
+  }
+  if (state === 'skipped') {
+    return 'Skipped';
+  }
+  return 'Pending';
+}
+
+function formatOwnedGamesValidationClass(state) {
+  if (state === 'valid') {
+    return 'ready';
+  }
+  if (state === 'invalid') {
+    return 'error';
+  }
+  if (state === 'unavailable') {
+    return 'paused';
+  }
+  if (state === 'skipped') {
+    return 'idle';
+  }
+  return 'starting';
+}
+
+function formatOwnedGamesValidationDetail(status) {
+  if (!status) {
+    return 'Validation will appear after the runtime controller syncs this account.';
+  }
+
+  const message = status.owned_games_validation_message || 'No validation details are available yet.';
+  const checkedAt = status.owned_games_validation_checked_at
+    ? ` Checked ${formatRuntimeTimestamp(status.owned_games_validation_checked_at)}.`
+    : '';
+  return `${formatOwnedGamesValidationState(status.owned_games_validation_state)}. ${message}${checkedAt}`;
 }
 
 function formatRuntimeTimestamp(value) {

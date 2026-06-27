@@ -2,6 +2,7 @@ import base64
 import json
 import time
 
+from steam_hour_booster.library import OwnedGamesValidationResult
 from steam_hour_booster.models import AccountProfile, IdleGame
 from steam_hour_booster.runtime import (
     PreviewBoosterRuntime,
@@ -15,10 +16,36 @@ from steam.enums import EResult
 from steam.enums.emsg import EMsg
 
 
-def build_preview_controller(session_store: SessionStore) -> RuntimeController:
+class FakeOwnedGamesValidator:
+    def __init__(self, results=None):
+        self.results = results or {}
+        self.calls = []
+
+    def validate_account(self, account: AccountProfile) -> OwnedGamesValidationResult:
+        self.calls.append(account.profile_id)
+        configured_app_ids = [int(game.app_id) for game in account.games if game.enabled]
+        return self.results.get(
+            account.profile_id,
+            OwnedGamesValidationResult(
+                state="valid",
+                message="All configured app IDs were found in the owned-games API for this account.",
+                checked_at="2026-06-27T00:00:00",
+                api_key_available=True,
+                validated_app_ids=configured_app_ids,
+                missing_app_ids=[],
+            ),
+        )
+
+
+def build_preview_controller(
+    session_store: SessionStore,
+    *,
+    owned_games_validator=None,
+) -> RuntimeController:
     return RuntimeController(
         session_store=session_store,
         transport=PreviewBoosterRuntime(),
+        owned_games_validator=owned_games_validator,
     )
 
 
@@ -181,6 +208,113 @@ def test_preview_runtime_exposes_auto_reply_configuration(tmp_path) -> None:
     assert status["auto_reply_message"] == "I am hour boosting right now."
     assert status["auto_reply_cooldown_seconds"] == 240
     assert status["auto_reply_timeout_seconds"] == 1800
+
+
+def test_runtime_controller_blocks_invalid_owned_game_configuration(tmp_path) -> None:
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    validator = FakeOwnedGamesValidator(
+        {
+            "steam_7656119": OwnedGamesValidationResult(
+                state="invalid",
+                message="Configured app IDs are not present in the owned-games API for this account: 570.",
+                checked_at="2026-06-27T00:00:00",
+                api_key_available=True,
+                validated_app_ids=[730, 570],
+                missing_app_ids=[570],
+                matched_titles={730: "Counter-Strike 2"},
+            )
+        }
+    )
+    controller = build_preview_controller(session_store, owned_games_validator=validator)
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        steam_id="7656119",
+        session_bundle_path=str(bundle_path),
+        games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+    )
+
+    snapshot = controller.refresh_accounts([account]).to_dict()
+    status = snapshot["statuses"][0]
+    started = controller.start_profile("steam_7656119", [account])
+
+    assert snapshot["counts"]["library_validation_blocked_accounts"] == 1
+    assert status["state"] == "error"
+    assert status["owned_games_validation_state"] == "invalid"
+    assert status["owned_games_missing_app_ids"] == [570]
+    assert status["can_start"] is False
+    assert started.state == RuntimeState.ERROR
+    assert "blocked" in started.message.lower()
+
+
+def test_runtime_controller_allows_start_when_validation_is_unavailable(tmp_path) -> None:
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    validator = FakeOwnedGamesValidator(
+        {
+            "steam_7656119": OwnedGamesValidationResult(
+                state="unavailable",
+                message="No Steam Web API key is registered for this account, so owned-game validation could not run.",
+                checked_at="2026-06-27T00:00:00",
+                api_key_available=False,
+                validated_app_ids=[730],
+            )
+        }
+    )
+    controller = build_preview_controller(session_store, owned_games_validator=validator)
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        steam_id="7656119",
+        session_bundle_path=str(bundle_path),
+        games=[IdleGame(app_id=730)],
+    )
+
+    snapshot = controller.refresh_accounts([account]).to_dict()
+    status = snapshot["statuses"][0]
+    started = controller.start_profile("steam_7656119", [account])
+
+    assert snapshot["counts"]["library_validation_unavailable_accounts"] == 1
+    assert status["state"] == "ready"
+    assert status["owned_games_validation_state"] == "unavailable"
+    assert status["can_start"] is True
+    assert "unavailable" in status["message"].lower()
+    assert started.state == RuntimeState.BOOSTING
+
+
+def test_runtime_controller_stops_active_lane_when_validation_turns_invalid(tmp_path) -> None:
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    validator = FakeOwnedGamesValidator()
+    controller = build_preview_controller(session_store, owned_games_validator=validator)
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        steam_id="7656119",
+        session_bundle_path=str(bundle_path),
+        games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+    )
+
+    started = controller.start_profile("steam_7656119", [account])
+    assert started.state == RuntimeState.BOOSTING
+
+    validator.results["steam_7656119"] = OwnedGamesValidationResult(
+        state="invalid",
+        message="Configured app IDs are not present in the owned-games API for this account: 570.",
+        checked_at="2026-06-27T00:05:00",
+        api_key_available=True,
+        validated_app_ids=[730, 570],
+        missing_app_ids=[570],
+        matched_titles={730: "Counter-Strike 2"},
+    )
+    snapshot = controller.refresh_accounts([account]).to_dict()
+    status = snapshot["statuses"][0]
+
+    assert status["state"] == "error"
+    assert status["active_app_ids"] == []
+    assert "stopped" in status["message"].lower()
+    assert snapshot["counts"]["boosting_accounts"] == 0
 
 
 def test_refresh_token_client_login_builds_client_logon_message() -> None:

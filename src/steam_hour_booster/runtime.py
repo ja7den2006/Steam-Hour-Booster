@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Protocol
 
+from steam_hour_booster.library import OwnedGamesValidationResult, OwnedGamesValidator
 from steam_hour_booster.models import (
     CONFLICT_POLICY_KICK,
     CONFLICT_POLICY_PAUSE,
@@ -60,6 +61,18 @@ def _effective_persona_state(persona_state: str, appear_online: bool) -> str:
     return normalized
 
 
+def _owned_games_validation_label(state: str) -> str:
+    if state == "valid":
+        return "Verified"
+    if state == "invalid":
+        return "Blocked"
+    if state == "unavailable":
+        return "Unavailable"
+    if state == "skipped":
+        return "Skipped"
+    return "Pending"
+
+
 class RuntimeState(str, Enum):
     IDLE = "idle"
     READY = "ready"
@@ -84,6 +97,13 @@ class AccountRuntimeStatus:
     session_bundle_path: str = ""
     configured_app_ids: List[int] = field(default_factory=list)
     active_app_ids: List[int] = field(default_factory=list)
+    owned_games_validation_state: str = "skipped"
+    owned_games_validation_message: str = ""
+    owned_games_validation_checked_at: str = ""
+    owned_games_api_key_available: bool = False
+    owned_games_validated_app_ids: List[int] = field(default_factory=list)
+    owned_games_missing_app_ids: List[int] = field(default_factory=list)
+    owned_games_matched_titles: Dict[int, str] = field(default_factory=dict)
     custom_status: str = ""
     auto_reply_enabled: bool = False
     auto_reply_message: str = ""
@@ -103,12 +123,7 @@ class AccountRuntimeStatus:
     updated_at: str = ""
 
     def to_dict(self) -> Dict[str, object]:
-        can_start = (
-            self.boost_enabled
-            and self.session_ready
-            and bool(self.configured_app_ids)
-            and self.state not in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED)
-        )
+        can_start = self.state == RuntimeState.READY
         can_stop = self.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED)
         return {
             "profile_id": self.profile_id,
@@ -128,6 +143,14 @@ class AccountRuntimeStatus:
             "configured_slot_count": len(self.configured_app_ids),
             "active_app_ids": list(self.active_app_ids),
             "active_slot_count": len(self.active_app_ids),
+            "owned_games_validation_state": self.owned_games_validation_state,
+            "owned_games_validation_label": _owned_games_validation_label(self.owned_games_validation_state),
+            "owned_games_validation_message": self.owned_games_validation_message,
+            "owned_games_validation_checked_at": self.owned_games_validation_checked_at,
+            "owned_games_api_key_available": self.owned_games_api_key_available,
+            "owned_games_validated_app_ids": list(self.owned_games_validated_app_ids),
+            "owned_games_missing_app_ids": list(self.owned_games_missing_app_ids),
+            "owned_games_matched_titles": dict(self.owned_games_matched_titles),
             "custom_status": self.custom_status,
             "auto_reply_enabled": self.auto_reply_enabled,
             "auto_reply_message": self.auto_reply_message,
@@ -175,6 +198,15 @@ class RuntimeSnapshot:
         blocked_count = sum(1 for status in self.accounts.values() if status.blocked_by_playing_session)
         disabled_count = sum(1 for status in self.accounts.values() if not status.boost_enabled)
         auto_reply_enabled_count = sum(1 for status in self.accounts.values() if status.auto_reply_enabled)
+        library_validation_blocked_count = sum(
+            1 for status in self.accounts.values() if status.owned_games_validation_state == "invalid"
+        )
+        library_validation_unavailable_count = sum(
+            1 for status in self.accounts.values() if status.owned_games_validation_state == "unavailable"
+        )
+        library_validation_verified_count = sum(
+            1 for status in self.accounts.values() if status.owned_games_validation_state == "valid"
+        )
         active_slot_count = sum(len(status.active_app_ids) for status in self.accounts.values())
         return {
             "transport_name": self.transport_name,
@@ -191,6 +223,9 @@ class RuntimeSnapshot:
                 "blocked_accounts": blocked_count,
                 "disabled_accounts": disabled_count,
                 "auto_reply_enabled_accounts": auto_reply_enabled_count,
+                "library_validation_blocked_accounts": library_validation_blocked_count,
+                "library_validation_unavailable_accounts": library_validation_unavailable_count,
+                "library_validation_verified_accounts": library_validation_verified_count,
                 "active_slots": active_slot_count,
             },
             "statuses": statuses,
@@ -1193,11 +1228,13 @@ class RuntimeController:
         *,
         session_store: Optional[SessionStore] = None,
         transport: Optional[BoosterRuntime] = None,
+        owned_games_validator: Optional[OwnedGamesValidator] = None,
         event_limit: int = 60,
         event_log_path: Optional[Path] = None,
     ) -> None:
         self._session_store = session_store or SessionStore()
         self._transport = transport or build_default_transport(self._session_store)
+        self._owned_games_validator = owned_games_validator or OwnedGamesValidator()
         self._event_limit = max(10, int(event_limit))
         default_event_log_path = Path(self._session_store.base_dir).parent / "logs" / "runtime.log"
         self._event_log_path = Path(event_log_path) if event_log_path is not None else default_event_log_path
@@ -1272,6 +1309,17 @@ class RuntimeController:
             status.updated_at = _iso_timestamp()
             self._touch_snapshot()
             self._log_event("Unable to start %s because no game slots are configured." % account.display_name)
+            return status
+
+        if status.owned_games_validation_state == "invalid":
+            status.state = RuntimeState.ERROR
+            status.message = (
+                "Runtime start blocked: %s"
+                % (status.owned_games_validation_message or "Configured app IDs failed owned-game validation.")
+            )
+            status.updated_at = _iso_timestamp()
+            self._touch_snapshot()
+            self._log_event("Unable to start %s because owned-game validation failed." % account.display_name)
             return status
 
         session_bundle = self._load_session_bundle(account)
@@ -1400,10 +1448,13 @@ class RuntimeController:
             if status.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
                 skipped += 1
                 continue
+            if status.state == RuntimeState.ERROR:
+                failed += 1
+                continue
             if not status.boost_enabled:
                 skipped += 1
                 continue
-            if not status.session_ready or not status.configured_app_ids:
+            if status.state != RuntimeState.READY:
                 skipped += 1
                 continue
             result = self.start_profile(account.profile_id, accounts)
@@ -1443,6 +1494,7 @@ class RuntimeController:
                 profile_id=account.profile_id,
                 display_name=account.display_name,
             )
+        was_active = status.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED)
 
         status.display_name = account.display_name
         status.login_mode = account.login_mode
@@ -1462,8 +1514,12 @@ class RuntimeController:
         status.session_bundle_path = str(account.session_bundle_path or "")
         status.configured_app_ids = [int(game.app_id) for game in account.games if game.enabled]
         status.session_ready = self._has_valid_session_bundle(account)
+        self._apply_owned_games_validation(
+            status,
+            self._owned_games_validator.validate_account(account),
+        )
 
-        if status.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
+        if was_active:
             if not status.session_ready:
                 status.state = RuntimeState.ERROR
                 status.active_app_ids = []
@@ -1476,6 +1532,21 @@ class RuntimeController:
                 status.blocked_by_playing_session = False
                 status.blocked_app_id = 0
                 status.message = "No configured slots remain for this active lane."
+            elif status.owned_games_validation_state == "invalid":
+                try:
+                    self._transport.stop(account.profile_id)
+                except Exception:
+                    pass
+                status.state = RuntimeState.ERROR
+                status.active_app_ids = []
+                status.blocked_by_playing_session = False
+                status.blocked_app_id = 0
+                status.last_error = status.owned_games_validation_message
+                status.message = "Active lane stopped because configured app IDs failed owned-game validation."
+                self._log_event(
+                    "Stopped %s because owned-game validation rejected the configured app IDs."
+                    % account.display_name
+                )
         else:
             status.active_app_ids = []
             status.auto_reply_sent_count = 0
@@ -1506,13 +1577,36 @@ class RuntimeController:
             status.state = RuntimeState.IDLE
             status.message = "No game slots configured."
             return
+        if status.owned_games_validation_state == "invalid":
+            status.state = RuntimeState.ERROR
+            status.last_error = status.owned_games_validation_message
+            status.message = "Owned-game validation blocked this lane. Review the configured app IDs."
+            return
         status.state = RuntimeState.READY
         status.message = self._ready_message_for(status)
 
     @staticmethod
     def _ready_message_for(status: AccountRuntimeStatus) -> str:
         slot_count = len(status.configured_app_ids)
-        return "Ready to start with %s configured slot%s." % (slot_count, "" if slot_count == 1 else "s")
+        base = "Ready to start with %s configured slot%s." % (slot_count, "" if slot_count == 1 else "s")
+        if status.owned_games_validation_state == "valid":
+            return "%s Owned-game validation passed." % base
+        if status.owned_games_validation_state == "unavailable":
+            return "%s Owned-game validation is unavailable for this session." % base
+        return base
+
+    @staticmethod
+    def _apply_owned_games_validation(
+        status: AccountRuntimeStatus,
+        validation: OwnedGamesValidationResult,
+    ) -> None:
+        status.owned_games_validation_state = validation.state
+        status.owned_games_validation_message = validation.message
+        status.owned_games_validation_checked_at = validation.checked_at
+        status.owned_games_api_key_available = bool(validation.api_key_available)
+        status.owned_games_validated_app_ids = list(validation.validated_app_ids)
+        status.owned_games_missing_app_ids = list(validation.missing_app_ids)
+        status.owned_games_matched_titles = dict(validation.matched_titles)
 
     def _has_valid_session_bundle(self, account: AccountProfile) -> bool:
         bundle = self._load_session_bundle(account)
