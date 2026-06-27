@@ -815,6 +815,15 @@ textarea {
   gap: 14px;
 }
 
+.editor-auto-reply-fields--disabled {
+  opacity: 0.62;
+}
+
+.editor-auto-reply-fields--disabled textarea,
+.editor-auto-reply-fields--disabled input {
+  pointer-events: none;
+}
+
 .game-slot-empty {
   padding: 18px;
   border-radius: 18px;

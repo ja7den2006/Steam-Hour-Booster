@@ -156,6 +156,33 @@ def test_runtime_controller_keeps_disabled_accounts_idle(tmp_path) -> None:
     assert "disabled" in started.message.lower()
 
 
+def test_preview_runtime_exposes_auto_reply_configuration(tmp_path) -> None:
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    controller = build_preview_controller(session_store)
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        steam_id="7656119",
+        session_bundle_path=str(bundle_path),
+        auto_reply_enabled=True,
+        auto_reply_message="I am hour boosting right now.",
+        auto_reply_cooldown_seconds=240,
+        auto_reply_timeout_seconds=1800,
+        games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+    )
+
+    controller.start_profile("steam_7656119", [account])
+    snapshot = controller.snapshot().to_dict()
+    status = snapshot["statuses"][0]
+
+    assert snapshot["counts"]["auto_reply_enabled_accounts"] == 1
+    assert status["auto_reply_enabled"] is True
+    assert status["auto_reply_message"] == "I am hour boosting right now."
+    assert status["auto_reply_cooldown_seconds"] == 240
+    assert status["auto_reply_timeout_seconds"] == 1800
+
+
 def test_refresh_token_client_login_builds_client_logon_message() -> None:
     steam_id = "76561197960287930"
 
@@ -765,3 +792,123 @@ def test_live_runtime_yields_to_newer_session(tmp_path) -> None:
     assert cleared is not None
     assert cleared.state == RuntimeState.IDLE
     assert cleared.blocked_by_playing_session is False
+
+
+def test_live_runtime_auto_replies_with_cooldown_and_timeout(tmp_path) -> None:
+    steam_id = "76561197960287930"
+    created_clients = []
+
+    class FakeChatUser:
+        def __init__(self, steam_id, name):
+            self.steam_id = steam_id
+            self.name = name
+            self.sent_messages = []
+
+        def send_message(self, message):
+            self.sent_messages.append(message)
+
+    class AutoReplyLiveClient:
+        def __init__(self):
+            self.connected = False
+            self.logged_on = False
+            self.played_calls = []
+            self._handlers = {}
+            self.chat_user = FakeChatUser(76561198000000001, "Friend One")
+            created_clients.append(self)
+
+        def on(self, event, callback):
+            self._handlers.setdefault(event, []).append(callback)
+
+        def emit_chat_message(self, text):
+            for callback in self._handlers.get("chat_message", []):
+                callback(self.chat_user, text)
+
+        def set_credential_location(self, path):
+            self.credential_location = path
+
+        def login_with_refresh_token(self, refresh_token, steam_id, account_name=""):
+            self.connected = True
+            self.logged_on = True
+            self.refresh_token = refresh_token
+            self.account_name = account_name
+            return EResult.OK
+
+        def change_status(self, **kwargs):
+            return None
+
+        def games_played(self, app_ids):
+            self.played_calls.append(list(app_ids))
+
+        def sleep(self, seconds):
+            time.sleep(0.01)
+
+        def logout(self):
+            self.logged_on = False
+            self.connected = False
+
+        def disconnect(self):
+            self.connected = False
+
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    refresh_token = build_client_refresh_token(steam_id)
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {"steam_id": steam_id, "refresh_token": refresh_token},
+    )
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        account_name="primary_account",
+        steam_id=steam_id,
+        session_bundle_path=str(bundle_path),
+        auto_reply_enabled=True,
+        auto_reply_message="I am hour boosting right now.",
+        auto_reply_cooldown_seconds=30,
+        auto_reply_timeout_seconds=60,
+        games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+    )
+    runtime = SteamNetworkBoosterRuntime(
+        session_store=session_store,
+        client_factory=AutoReplyLiveClient,
+        start_timeout=2.0,
+        sleep_interval=0.01,
+    )
+
+    original_time = time.time
+    timeline = {"value": 1000.0}
+
+    def fake_time():
+        return timeline["value"]
+
+    try:
+        time.time = fake_time
+        runtime.start(account, session_store.load_bundle_path(str(bundle_path)))
+
+        created_clients[0].emit_chat_message("hey")
+        first = runtime.inspect()["steam_7656119"]
+
+        timeline["value"] += 10.0
+        created_clients[0].emit_chat_message("still there?")
+        second = runtime.inspect()["steam_7656119"]
+
+        timeline["value"] += 31.0
+        created_clients[0].emit_chat_message("checking again")
+        third = runtime.inspect()["steam_7656119"]
+
+        timeline["value"] += 61.0
+        created_clients[0].emit_chat_message("new burst")
+        fourth = runtime.inspect()["steam_7656119"]
+    finally:
+        time.time = original_time
+        runtime.stop("steam_7656119")
+
+    assert created_clients[0].chat_user.sent_messages == [
+        "I am hour boosting right now.",
+        "I am hour boosting right now.",
+        "I am hour boosting right now.",
+    ]
+    assert first.auto_reply_sent_count == 1
+    assert second.auto_reply_sent_count == 1
+    assert third.auto_reply_sent_count == 2
+    assert fourth.auto_reply_sent_count == 3
+    assert fourth.auto_reply_last_sender == "Friend One"

@@ -56,6 +56,10 @@ class AccountProfile:
     persona_state: str = "Online"
     conflict_policy: str = CONFLICT_POLICY_PAUSE
     custom_status: str = ""
+    auto_reply_enabled: bool = False
+    auto_reply_message: str = ""
+    auto_reply_cooldown_seconds: int = 180
+    auto_reply_timeout_seconds: int = 1800
     session_bundle_path: Optional[str] = None
     notes: str = ""
     games: List[IdleGame] = field(default_factory=list)
@@ -72,6 +76,10 @@ class AccountProfile:
             "persona_state": self.persona_state,
             "conflict_policy": self.conflict_policy,
             "custom_status": self.custom_status,
+            "auto_reply_enabled": bool(self.auto_reply_enabled),
+            "auto_reply_message": self.auto_reply_message,
+            "auto_reply_cooldown_seconds": int(self.auto_reply_cooldown_seconds),
+            "auto_reply_timeout_seconds": int(self.auto_reply_timeout_seconds),
             "session_bundle_path": self.session_bundle_path,
             "notes": self.notes,
             "games": [game.to_dict() for game in self.games],
@@ -90,6 +98,10 @@ class AccountProfile:
             persona_state=str(payload.get("persona_state", "Online")),
             conflict_policy=str(payload.get("conflict_policy", CONFLICT_POLICY_PAUSE)),
             custom_status=str(payload.get("custom_status", "")),
+            auto_reply_enabled=bool(payload.get("auto_reply_enabled", False)),
+            auto_reply_message=str(payload.get("auto_reply_message", "")),
+            auto_reply_cooldown_seconds=int(payload.get("auto_reply_cooldown_seconds", 180)),
+            auto_reply_timeout_seconds=int(payload.get("auto_reply_timeout_seconds", 1800)),
             session_bundle_path=payload.get("session_bundle_path"),
             notes=str(payload.get("notes", "")),
             games=[IdleGame.from_dict(item) for item in payload.get("games", [])],

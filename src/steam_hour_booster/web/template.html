@@ -376,6 +376,48 @@ __INLINE_STYLES__
                     </label>
                   </div>
 
+                  <div class="game-slot-panel card card--embedded">
+                    <div class="card-header">
+                      <div>
+                        <div class="eyebrow">AUTO-REPLY</div>
+                        <h3>Incoming message safeguards</h3>
+                      </div>
+                    </div>
+
+                    <label class="toggle-card" for="editor-auto-reply-enabled">
+                      <span class="toggle-card__copy">
+                        <strong>Reply To Incoming Messages</strong>
+                        <small>Automatically answer friend chat messages while this boost lane is active.</small>
+                      </span>
+                      <span class="toggle-card__control">
+                        <input id="editor-auto-reply-enabled" type="checkbox">
+                        <span class="toggle-card__indicator"></span>
+                      </span>
+                    </label>
+
+                    <div class="editor-auto-reply-fields" id="editor-auto-reply-fields">
+                      <div class="form-grid">
+                        <label class="field field--wide">
+                          <span>Auto-Reply Message</span>
+                          <textarea id="editor-auto-reply-message" rows="4" placeholder="I am hour boosting right now. Please reply later."></textarea>
+                        </label>
+                      </div>
+
+                      <div class="form-grid">
+                        <label class="field">
+                          <span>Cooldown Seconds</span>
+                          <input id="editor-auto-reply-cooldown" type="number" min="15" max="86400" step="1" placeholder="180">
+                        </label>
+                        <label class="field">
+                          <span>Session Timeout Seconds</span>
+                          <input id="editor-auto-reply-timeout" type="number" min="30" max="86400" step="1" placeholder="1800">
+                        </label>
+                      </div>
+
+                      <p class="helper-copy">Cooldown limits repeated replies to the same friend. Timeout stops a long-running message burst until the chat goes quiet and resets.</p>
+                    </div>
+                  </div>
+
                   <div class="form-grid">
                     <label class="field field--wide">
                       <span>Popular Preset</span>

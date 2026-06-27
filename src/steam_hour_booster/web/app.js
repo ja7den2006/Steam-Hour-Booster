@@ -285,6 +285,13 @@ function bindAccountActions() {
       updatePresenceEditorState();
     });
   }
+
+  const autoReplyToggle = document.getElementById('editor-auto-reply-enabled');
+  if (autoReplyToggle) {
+    autoReplyToggle.addEventListener('change', () => {
+      updateAutoReplyEditorState();
+    });
+  }
 }
 
 function bindRuntimeActions() {
@@ -459,6 +466,8 @@ function fillAccountEditor() {
     setText('account-editor-slot-pill', '0 slots');
     shellState.editorGames = [];
     renderEditorGames();
+    setChecked('editor-auto-reply-enabled', false);
+    updateAutoReplyEditorState();
     return;
   }
 
@@ -474,11 +483,15 @@ function fillAccountEditor() {
 
   setChecked('editor-boost-enabled', Boolean(profile.boost_enabled));
   setChecked('editor-appear-online', profile.appear_online !== false);
+  setChecked('editor-auto-reply-enabled', Boolean(profile.auto_reply_enabled));
   setInputValue('editor-display-name', profile.display_name || '');
   setInputValue('editor-account-name', profile.account_name || '');
   setInputValue('editor-steam-id', profile.steam_id || '');
   setInputValue('editor-login-mode', profile.login_mode || '');
   setInputValue('editor-custom-status', profile.custom_status || '');
+  setInputValue('editor-auto-reply-message', profile.auto_reply_message || '');
+  setInputValue('editor-auto-reply-cooldown', String(profile.auto_reply_cooldown_seconds || 180));
+  setInputValue('editor-auto-reply-timeout', String(profile.auto_reply_timeout_seconds || 1800));
   setInputValue('editor-games-text', profile.games_text || '');
   setInputValue('editor-notes', profile.notes || '');
   setSelectValue('editor-persona-state', profile.persona_state || 'Online');
@@ -495,6 +508,7 @@ function fillAccountEditor() {
     : [];
   renderEditorGames();
   updatePresenceEditorState();
+  updateAutoReplyEditorState();
 
   const sessionSummary = profile.session_summary || {};
   setText('editor-session-path', profile.session_bundle_path || 'No session bundle file');
@@ -590,6 +604,10 @@ function fillRuntimeAccounts(statuses) {
           <strong>${escapeHtml(formatConflictPolicy(status.conflict_policy))}</strong>
         </div>
         <div>
+          <span>Auto-Reply</span>
+          <strong>${status.auto_reply_enabled ? 'Armed' : 'Off'}</strong>
+        </div>
+        <div>
           <span>Reconnects</span>
           <strong>${Number(status.reconnect_attempts || 0)}</strong>
         </div>
@@ -597,6 +615,7 @@ function fillRuntimeAccounts(statuses) {
       <div class="runtime-account__message">${escapeHtml(status.message || 'No runtime message available.')}</div>
       <div class="runtime-account__details">
         <div class="runtime-account__detail"><strong>Connected:</strong> ${escapeHtml(formatRuntimeTimestamp(status.connected_at))}</div>
+        ${status.auto_reply_enabled ? `<div class="runtime-account__detail"><strong>Auto-reply:</strong> ${escapeHtml(formatAutoReplySummary(status))}</div>` : ''}
         ${status.blocked_by_playing_session ? `<div class="runtime-account__detail"><strong>Blocked app:</strong> ${escapeHtml(formatBlockedApp(status.blocked_app_id))}</div>` : ''}
         ${status.last_error ? `<div class="runtime-account__detail"><strong>Last issue:</strong> ${escapeHtml(status.last_error)}</div>` : ''}
       </div>
@@ -1024,6 +1043,19 @@ function updatePresenceEditorState() {
   personaState.disabled = !appearOnline.checked;
 }
 
+function updateAutoReplyEditorState() {
+  const toggle = document.getElementById('editor-auto-reply-enabled');
+  const shell = document.getElementById('editor-auto-reply-fields');
+  if (!toggle || !shell) {
+    return;
+  }
+  const enabled = Boolean(toggle.checked);
+  shell.classList.toggle('editor-auto-reply-fields--disabled', !enabled);
+  shell.querySelectorAll('textarea, input').forEach((element) => {
+    element.disabled = !enabled;
+  });
+}
+
 function renderEditorGames() {
   const list = document.getElementById('editor-games-list');
   const empty = document.getElementById('editor-games-empty');
@@ -1141,6 +1173,10 @@ async function saveAccountProfile() {
     persona_state: getValue('editor-persona-state'),
     conflict_policy: getValue('editor-conflict-policy'),
     custom_status: getValue('editor-custom-status'),
+    auto_reply_enabled: getChecked('editor-auto-reply-enabled'),
+    auto_reply_message: getValue('editor-auto-reply-message'),
+    auto_reply_cooldown_seconds: getValue('editor-auto-reply-cooldown'),
+    auto_reply_timeout_seconds: getValue('editor-auto-reply-timeout'),
     games_text: getValue('editor-games-text'),
     notes: getValue('editor-notes'),
   });
@@ -1321,6 +1357,15 @@ function formatConflictPolicy(policy) {
     return 'Yield to New Session';
   }
   return 'Pause and Wait';
+}
+
+function formatAutoReplySummary(status) {
+  const sentCount = Number(status.auto_reply_sent_count || 0);
+  const cooldown = Number(status.auto_reply_cooldown_seconds || 0);
+  const timeout = Number(status.auto_reply_timeout_seconds || 0);
+  const lastSender = status.auto_reply_last_sender ? ` Last reply: ${status.auto_reply_last_sender}.` : '';
+  const lastSent = status.auto_reply_last_sent_at ? ` Sent ${formatRuntimeTimestamp(status.auto_reply_last_sent_at)}.` : '';
+  return `${sentCount} sent, ${cooldown}s cooldown, ${timeout}s timeout.${lastSender}${lastSent}`;
 }
 
 function formatBlockedApp(appId) {

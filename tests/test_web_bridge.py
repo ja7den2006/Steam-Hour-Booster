@@ -285,6 +285,10 @@ def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
             "persona_state": "Invisible",
             "conflict_policy": "kick",
             "custom_status": "Boosting quietly",
+            "auto_reply_enabled": True,
+            "auto_reply_message": "I am hour boosting right now.",
+            "auto_reply_cooldown_seconds": "240",
+            "auto_reply_timeout_seconds": "1800",
             "games_text": "730: Counter-Strike 2\n570: Dota 2\n730",
             "notes": "Night queue",
         }
@@ -298,6 +302,10 @@ def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
     assert saved.persona_state == "Invisible"
     assert saved.conflict_policy == "kick"
     assert saved.custom_status == "Boosting quietly"
+    assert saved.auto_reply_enabled is True
+    assert saved.auto_reply_message == "I am hour boosting right now."
+    assert saved.auto_reply_cooldown_seconds == 240
+    assert saved.auto_reply_timeout_seconds == 1800
     assert saved.notes == "Night queue"
     assert len(saved.games) == 2
     assert saved.games[0].title == "Counter-Strike 2"
@@ -391,6 +399,42 @@ def test_save_account_profile_disables_active_preview_lane(tmp_path) -> None:
     assert runtime_status["state"] == "idle"
     assert runtime_status["boost_enabled"] is False
     assert runtime_status["can_start"] is False
+
+
+def test_save_account_profile_requires_message_when_auto_reply_enabled(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                steam_id="7656119",
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.save_account_profile(
+        {
+            "profile_id": "steam_7656119",
+            "display_name": "Primary",
+            "auto_reply_enabled": True,
+            "auto_reply_message": "",
+            "auto_reply_cooldown_seconds": "180",
+            "auto_reply_timeout_seconds": "1800",
+            "persona_state": "Online",
+            "games_text": "730",
+        }
+    )
+
+    assert result["ok"] is False
+    assert "Auto-reply message is required" in result["message"]
 
 
 def test_save_account_profile_rejects_too_many_slots(tmp_path) -> None:

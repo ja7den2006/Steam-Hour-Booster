@@ -85,6 +85,14 @@ class AccountRuntimeStatus:
     configured_app_ids: List[int] = field(default_factory=list)
     active_app_ids: List[int] = field(default_factory=list)
     custom_status: str = ""
+    auto_reply_enabled: bool = False
+    auto_reply_message: str = ""
+    auto_reply_cooldown_seconds: int = 180
+    auto_reply_timeout_seconds: int = 1800
+    auto_reply_sent_count: int = 0
+    auto_reply_last_sent_at: str = ""
+    auto_reply_last_sender: str = ""
+    auto_reply_last_message_at: str = ""
     auth_source: str = ""
     reconnect_attempts: int = 0
     connected_at: str = ""
@@ -121,6 +129,14 @@ class AccountRuntimeStatus:
             "active_app_ids": list(self.active_app_ids),
             "active_slot_count": len(self.active_app_ids),
             "custom_status": self.custom_status,
+            "auto_reply_enabled": self.auto_reply_enabled,
+            "auto_reply_message": self.auto_reply_message,
+            "auto_reply_cooldown_seconds": self.auto_reply_cooldown_seconds,
+            "auto_reply_timeout_seconds": self.auto_reply_timeout_seconds,
+            "auto_reply_sent_count": self.auto_reply_sent_count,
+            "auto_reply_last_sent_at": self.auto_reply_last_sent_at,
+            "auto_reply_last_sender": self.auto_reply_last_sender,
+            "auto_reply_last_message_at": self.auto_reply_last_message_at,
             "auth_source": self.auth_source,
             "reconnect_attempts": self.reconnect_attempts,
             "connected_at": self.connected_at,
@@ -158,6 +174,7 @@ class RuntimeSnapshot:
         error_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.ERROR)
         blocked_count = sum(1 for status in self.accounts.values() if status.blocked_by_playing_session)
         disabled_count = sum(1 for status in self.accounts.values() if not status.boost_enabled)
+        auto_reply_enabled_count = sum(1 for status in self.accounts.values() if status.auto_reply_enabled)
         active_slot_count = sum(len(status.active_app_ids) for status in self.accounts.values())
         return {
             "transport_name": self.transport_name,
@@ -173,6 +190,7 @@ class RuntimeSnapshot:
                 "error_accounts": error_count,
                 "blocked_accounts": blocked_count,
                 "disabled_accounts": disabled_count,
+                "auto_reply_enabled_accounts": auto_reply_enabled_count,
                 "active_slots": active_slot_count,
             },
             "statuses": statuses,
@@ -194,6 +212,14 @@ class RuntimeLaneTelemetry:
     reconnect_attempts: int = 0
     connected_at: str = ""
     conflict_policy: str = CONFLICT_POLICY_PAUSE
+    auto_reply_enabled: bool = False
+    auto_reply_message: str = ""
+    auto_reply_cooldown_seconds: int = 180
+    auto_reply_timeout_seconds: int = 1800
+    auto_reply_sent_count: int = 0
+    auto_reply_last_sent_at: str = ""
+    auto_reply_last_sender: str = ""
+    auto_reply_last_message_at: str = ""
     blocked_by_playing_session: bool = False
     blocked_app_id: int = 0
     last_error: str = ""
@@ -226,12 +252,19 @@ class PreviewBoosterRuntime:
     preview_mode = True
 
     def __init__(self) -> None:
-        self._active_profiles: Dict[str, List[int]] = {}
+        self._active_profiles: Dict[str, Dict[str, object]] = {}
 
     def start(self, account: AccountProfile, session_bundle: Dict[str, object]) -> RuntimeStartResult:
         del session_bundle
         active_app_ids = [int(game.app_id) for game in account.games if game.enabled]
-        self._active_profiles[account.profile_id] = list(active_app_ids)
+        self._active_profiles[account.profile_id] = {
+            "active_app_ids": list(active_app_ids),
+            "conflict_policy": account.conflict_policy,
+            "auto_reply_enabled": account.auto_reply_enabled,
+            "auto_reply_message": account.auto_reply_message,
+            "auto_reply_cooldown_seconds": max(15, int(account.auto_reply_cooldown_seconds)),
+            "auto_reply_timeout_seconds": max(30, int(account.auto_reply_timeout_seconds)),
+        }
         slot_count = len(active_app_ids)
         return RuntimeStartResult(
             active_app_ids=active_app_ids,
@@ -245,7 +278,14 @@ class PreviewBoosterRuntime:
     def reconfigure(self, account: AccountProfile, session_bundle: Dict[str, object]) -> RuntimeStartResult:
         del session_bundle
         active_app_ids = [int(game.app_id) for game in account.games if game.enabled]
-        self._active_profiles[account.profile_id] = list(active_app_ids)
+        self._active_profiles[account.profile_id] = {
+            "active_app_ids": list(active_app_ids),
+            "conflict_policy": account.conflict_policy,
+            "auto_reply_enabled": account.auto_reply_enabled,
+            "auto_reply_message": account.auto_reply_message,
+            "auto_reply_cooldown_seconds": max(15, int(account.auto_reply_cooldown_seconds)),
+            "auto_reply_timeout_seconds": max(30, int(account.auto_reply_timeout_seconds)),
+        }
         return RuntimeStartResult(
             active_app_ids=active_app_ids,
             message="Preview lane updated to %s slot%s." % (len(active_app_ids), "" if len(active_app_ids) == 1 else "s"),
@@ -256,12 +296,20 @@ class PreviewBoosterRuntime:
         return {
             profile_id: RuntimeLaneTelemetry(
                 state=RuntimeState.BOOSTING,
-                active_app_ids=list(app_ids),
+                active_app_ids=list(payload.get("active_app_ids", [])),
                 auth_source="preview",
-                message="Preview runtime lane active with %s slot%s." % (len(app_ids), "" if len(app_ids) == 1 else "s"),
+                conflict_policy=str(payload.get("conflict_policy", CONFLICT_POLICY_PAUSE)),
+                auto_reply_enabled=bool(payload.get("auto_reply_enabled", False)),
+                auto_reply_message=str(payload.get("auto_reply_message", "")),
+                auto_reply_cooldown_seconds=int(payload.get("auto_reply_cooldown_seconds", 180)),
+                auto_reply_timeout_seconds=int(payload.get("auto_reply_timeout_seconds", 1800)),
+                message="Preview runtime lane active with %s slot%s." % (
+                    len(payload.get("active_app_ids", [])),
+                    "" if len(payload.get("active_app_ids", [])) == 1 else "s",
+                ),
                 updated_at=now,
             )
-            for profile_id, app_ids in self._active_profiles.items()
+            for profile_id, payload in self._active_profiles.items()
         }
 
     def shutdown(self) -> None:
@@ -359,6 +407,10 @@ class _LiveWorkerConfig:
     persona_state: str
     conflict_policy: str
     custom_status: str
+    auto_reply_enabled: bool
+    auto_reply_message: str
+    auto_reply_cooldown_seconds: int
+    auto_reply_timeout_seconds: int
     app_ids: List[int]
 
 
@@ -367,6 +419,13 @@ class _LoginAttemptResult:
     client: Optional[RefreshTokenSteamClient]
     auth_source: str = ""
     error_message: str = ""
+
+
+@dataclass
+class _AutoReplyConversation:
+    window_started_at: float
+    last_incoming_at: float
+    last_reply_at: float = 0.0
 
 
 class _LiveBoostWorker:
@@ -404,6 +463,11 @@ class _LiveBoostWorker:
         self._yielded_to_new_session = False
         self._last_kick_attempt_at = 0.0
         self._last_error = ""
+        self._auto_reply_sent_count = 0
+        self._auto_reply_last_sent_at = ""
+        self._auto_reply_last_sender = ""
+        self._auto_reply_last_message_at = ""
+        self._chat_sessions: Dict[int, _AutoReplyConversation] = {}
         self._updated_at = _iso_timestamp()
         self._error_message = ""
         self._cached_login_key = self._load_cached_login_key()
@@ -490,6 +554,14 @@ class _LiveBoostWorker:
                 reconnect_attempts=self._reconnect_attempts,
                 connected_at=self._connected_at,
                 conflict_policy=self._desired_config.conflict_policy,
+                auto_reply_enabled=self._desired_config.auto_reply_enabled,
+                auto_reply_message=self._desired_config.auto_reply_message,
+                auto_reply_cooldown_seconds=self._desired_config.auto_reply_cooldown_seconds,
+                auto_reply_timeout_seconds=self._desired_config.auto_reply_timeout_seconds,
+                auto_reply_sent_count=self._auto_reply_sent_count,
+                auto_reply_last_sent_at=self._auto_reply_last_sent_at,
+                auto_reply_last_sender=self._auto_reply_last_sender,
+                auto_reply_last_message_at=self._auto_reply_last_message_at,
                 blocked_by_playing_session=self._blocked_by_playing_session,
                 blocked_app_id=self._blocked_app_id,
                 last_error=self._last_error,
@@ -641,6 +713,15 @@ class _LiveBoostWorker:
         message = self._build_active_message(config, auth_source=auth_source, mode=mode)
         if config.custom_status:
             message = "%s Custom status stays stored locally for now." % message
+        if config.auto_reply_enabled and config.auto_reply_message:
+            message = (
+                "%s Auto-reply is armed at %ss cooldown with a %ss session timeout."
+                % (
+                    message,
+                    config.auto_reply_cooldown_seconds,
+                    config.auto_reply_timeout_seconds,
+                )
+            )
 
         self._set_status(
             RuntimeState.BOOSTING,
@@ -780,6 +861,10 @@ class _LiveBoostWorker:
                 persona_state=self._desired_config.persona_state,
                 conflict_policy=self._desired_config.conflict_policy,
                 custom_status=self._desired_config.custom_status,
+                auto_reply_enabled=self._desired_config.auto_reply_enabled,
+                auto_reply_message=self._desired_config.auto_reply_message,
+                auto_reply_cooldown_seconds=self._desired_config.auto_reply_cooldown_seconds,
+                auto_reply_timeout_seconds=self._desired_config.auto_reply_timeout_seconds,
                 app_ids=list(self._desired_config.app_ids),
             )
             if with_revision:
@@ -806,6 +891,90 @@ class _LiveBoostWorker:
         if not hasattr(client, "on"):
             return
         client.on(EMsg.ClientPlayingSessionState, self._handle_playing_session_state)
+        client.on("chat_message", self._handle_chat_message)
+
+    def _handle_chat_message(self, user, message: str) -> None:
+        config = self._clone_config()
+        if not config.auto_reply_enabled:
+            return
+
+        with self._condition:
+            if self._state not in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
+                return
+
+        reply_message = str(config.auto_reply_message or "").strip()
+        if not reply_message:
+            return
+
+        timeout_seconds = max(30, int(config.auto_reply_timeout_seconds))
+        cooldown_seconds = max(15, int(config.auto_reply_cooldown_seconds))
+        now = time.time()
+        friend_id = int(getattr(user, "steam_id", 0) or 0)
+        if friend_id <= 0:
+            return
+
+        with self._condition:
+            conversation = self._chat_sessions.get(friend_id)
+            if conversation is None or (now - conversation.last_incoming_at) > timeout_seconds:
+                conversation = _AutoReplyConversation(
+                    window_started_at=now,
+                    last_incoming_at=now,
+                )
+                self._chat_sessions[friend_id] = conversation
+            else:
+                conversation.last_incoming_at = now
+
+            self._auto_reply_last_message_at = _iso_timestamp()
+
+            if (now - conversation.window_started_at) > timeout_seconds:
+                self._updated_at = _iso_timestamp()
+                self._condition.notify_all()
+                return
+
+            if conversation.last_reply_at and (now - conversation.last_reply_at) < cooldown_seconds:
+                self._updated_at = _iso_timestamp()
+                self._condition.notify_all()
+                return
+
+        try:
+            user.send_message(reply_message)
+        except Exception as exc:
+            failure = str(exc).strip() or "Auto-reply dispatch failed."
+            self._set_status(
+                self._state,
+                "%s Auto-reply failed." % self._message,
+                active_app_ids=self.active_app_ids,
+                auth_source=self._auth_source,
+                reconnect_attempts=self._reconnect_attempts,
+                connected_at=self._connected_at,
+                conflict_policy=config.conflict_policy,
+                blocked_by_playing_session=self._blocked_by_playing_session,
+                blocked_app_id=self._blocked_app_id,
+                last_error=failure,
+            )
+            return
+
+        sender_name = str(getattr(user, "name", "") or getattr(user, "steam_id", "") or friend_id).strip()
+        sent_timestamp = _iso_timestamp()
+        with self._condition:
+            conversation = self._chat_sessions.get(friend_id)
+            if conversation is None:
+                conversation = _AutoReplyConversation(
+                    window_started_at=now,
+                    last_incoming_at=now,
+                )
+                self._chat_sessions[friend_id] = conversation
+            conversation.last_reply_at = now
+            conversation.last_incoming_at = now
+            self._auto_reply_sent_count += 1
+            self._auto_reply_last_sent_at = sent_timestamp
+            self._auto_reply_last_sender = sender_name
+            self._last_error = ""
+            self._message = (
+                "Live lane active with auto-reply. Last reply sent to %s." % sender_name
+            )
+            self._updated_at = sent_timestamp
+            self._condition.notify_all()
 
     def _handle_playing_session_state(self, message) -> None:
         body = getattr(message, "body", None)
@@ -1004,6 +1173,10 @@ class SteamNetworkBoosterRuntime:
             persona_state=account.persona_state,
             conflict_policy=account.conflict_policy,
             custom_status=account.custom_status,
+            auto_reply_enabled=account.auto_reply_enabled,
+            auto_reply_message=account.auto_reply_message,
+            auto_reply_cooldown_seconds=max(15, int(account.auto_reply_cooldown_seconds)),
+            auto_reply_timeout_seconds=max(30, int(account.auto_reply_timeout_seconds)),
             app_ids=[int(game.app_id) for game in account.games if game.enabled],
         )
 
@@ -1156,6 +1329,10 @@ class RuntimeController:
             return status
 
         status.active_app_ids = []
+        status.auto_reply_sent_count = 0
+        status.auto_reply_last_sent_at = ""
+        status.auto_reply_last_sender = ""
+        status.auto_reply_last_message_at = ""
         status.auth_source = ""
         status.reconnect_attempts = 0
         status.connected_at = ""
@@ -1278,6 +1455,10 @@ class RuntimeController:
         )
         status.conflict_policy = account.conflict_policy
         status.custom_status = account.custom_status
+        status.auto_reply_enabled = account.auto_reply_enabled
+        status.auto_reply_message = account.auto_reply_message
+        status.auto_reply_cooldown_seconds = max(15, int(account.auto_reply_cooldown_seconds))
+        status.auto_reply_timeout_seconds = max(30, int(account.auto_reply_timeout_seconds))
         status.session_bundle_path = str(account.session_bundle_path or "")
         status.configured_app_ids = [int(game.app_id) for game in account.games if game.enabled]
         status.session_ready = self._has_valid_session_bundle(account)
@@ -1297,6 +1478,10 @@ class RuntimeController:
                 status.message = "No configured slots remain for this active lane."
         else:
             status.active_app_ids = []
+            status.auto_reply_sent_count = 0
+            status.auto_reply_last_sent_at = ""
+            status.auto_reply_last_sender = ""
+            status.auto_reply_last_message_at = ""
             status.auth_source = ""
             status.reconnect_attempts = 0
             status.connected_at = ""
@@ -1373,6 +1558,14 @@ class RuntimeController:
             status.reconnect_attempts = telemetry.reconnect_attempts
             status.connected_at = telemetry.connected_at
             status.conflict_policy = telemetry.conflict_policy or status.conflict_policy
+            status.auto_reply_enabled = telemetry.auto_reply_enabled
+            status.auto_reply_message = telemetry.auto_reply_message
+            status.auto_reply_cooldown_seconds = telemetry.auto_reply_cooldown_seconds
+            status.auto_reply_timeout_seconds = telemetry.auto_reply_timeout_seconds
+            status.auto_reply_sent_count = telemetry.auto_reply_sent_count
+            status.auto_reply_last_sent_at = telemetry.auto_reply_last_sent_at
+            status.auto_reply_last_sender = telemetry.auto_reply_last_sender
+            status.auto_reply_last_message_at = telemetry.auto_reply_last_message_at
             status.blocked_by_playing_session = telemetry.blocked_by_playing_session
             status.blocked_app_id = telemetry.blocked_app_id
             status.last_error = telemetry.last_error

@@ -328,8 +328,30 @@ class DesktopApi:
             persona_state = self._normalize_persona_state(values.get("persona_state"))
             conflict_policy = self._normalize_conflict_policy(values.get("conflict_policy"))
             custom_status = self._normalize_optional_string(values.get("custom_status"))
+            auto_reply_enabled = self._normalize_bool(
+                values.get("auto_reply_enabled"),
+                default=account.auto_reply_enabled,
+            )
+            auto_reply_message = self._normalize_optional_string(values.get("auto_reply_message"))
+            auto_reply_cooldown_seconds = self._normalize_bounded_int(
+                values.get("auto_reply_cooldown_seconds"),
+                label="auto-reply cooldown",
+                default=account.auto_reply_cooldown_seconds,
+                minimum=15,
+                maximum=86400,
+            )
+            auto_reply_timeout_seconds = self._normalize_bounded_int(
+                values.get("auto_reply_timeout_seconds"),
+                label="auto-reply timeout",
+                default=account.auto_reply_timeout_seconds,
+                minimum=30,
+                maximum=86400,
+            )
             notes = self._normalize_optional_string(values.get("notes"))
             games = self._parse_games_text(values.get("games_text"))
+
+            if auto_reply_enabled and not auto_reply_message:
+                raise SteamValidationError("Auto-reply message is required when auto-reply is enabled.")
 
             updated = AccountProfile(
                 profile_id=account.profile_id,
@@ -342,6 +364,10 @@ class DesktopApi:
                 persona_state=persona_state,
                 conflict_policy=conflict_policy,
                 custom_status=custom_status,
+                auto_reply_enabled=auto_reply_enabled,
+                auto_reply_message=auto_reply_message,
+                auto_reply_cooldown_seconds=auto_reply_cooldown_seconds,
+                auto_reply_timeout_seconds=auto_reply_timeout_seconds,
                 session_bundle_path=account.session_bundle_path,
                 notes=notes,
                 games=games,
@@ -673,6 +699,10 @@ class DesktopApi:
         persona_state = existing.persona_state if existing else "Online"
         conflict_policy = existing.conflict_policy if existing else CONFLICT_POLICY_PAUSE
         custom_status = existing.custom_status if existing else ""
+        auto_reply_enabled = existing.auto_reply_enabled if existing else False
+        auto_reply_message = existing.auto_reply_message if existing else ""
+        auto_reply_cooldown_seconds = existing.auto_reply_cooldown_seconds if existing else 180
+        auto_reply_timeout_seconds = existing.auto_reply_timeout_seconds if existing else 1800
         notes = existing.notes if existing else ""
         games = list(existing.games) if existing else []
 
@@ -687,6 +717,10 @@ class DesktopApi:
             persona_state=persona_state,
             conflict_policy=conflict_policy,
             custom_status=custom_status,
+            auto_reply_enabled=auto_reply_enabled,
+            auto_reply_message=auto_reply_message,
+            auto_reply_cooldown_seconds=auto_reply_cooldown_seconds,
+            auto_reply_timeout_seconds=auto_reply_timeout_seconds,
             session_bundle_path=str(session_path),
             notes=notes,
             games=games,
@@ -796,6 +830,29 @@ class DesktopApi:
             return False
         return bool(default)
 
+    def _normalize_bounded_int(
+        self,
+        value: Any,
+        *,
+        label: str,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        if value is None or str(value).strip() == "":
+            resolved = int(default)
+        else:
+            normalized = self._normalize_optional_string(value)
+            if not normalized.isdigit():
+                raise SteamValidationError("%s must be a whole number." % label.capitalize())
+            resolved = int(normalized)
+        if resolved < minimum or resolved > maximum:
+            raise SteamValidationError(
+                "%s must be between %s and %s seconds."
+                % (label.capitalize(), minimum, maximum)
+            )
+        return resolved
+
     @staticmethod
     def _effective_persona_state(account: AccountProfile) -> str:
         if not account.appear_online:
@@ -894,6 +951,10 @@ class DesktopApi:
             "effective_persona_state": self._effective_persona_state(account),
             "conflict_policy": account.conflict_policy,
             "custom_status": account.custom_status,
+            "auto_reply_enabled": account.auto_reply_enabled,
+            "auto_reply_message": account.auto_reply_message,
+            "auto_reply_cooldown_seconds": account.auto_reply_cooldown_seconds,
+            "auto_reply_timeout_seconds": account.auto_reply_timeout_seconds,
             "notes": account.notes,
             "session_bundle_path": session_path,
             "has_session_bundle": has_session_bundle,

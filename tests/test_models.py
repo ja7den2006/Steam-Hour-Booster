@@ -18,6 +18,10 @@ def test_app_config_round_trip() -> None:
                 appear_online=False,
                 conflict_policy="kick",
                 custom_status="Boosting library",
+                auto_reply_enabled=True,
+                auto_reply_message="I am hour boosting right now.",
+                auto_reply_cooldown_seconds=240,
+                auto_reply_timeout_seconds=1800,
                 games=[
                     IdleGame(app_id=730, title="Counter-Strike 2"),
                     IdleGame(app_id=570, title="Dota 2", enabled=False),
@@ -35,5 +39,9 @@ def test_app_config_round_trip() -> None:
     assert restored.accounts[0].boost_enabled is False
     assert restored.accounts[0].appear_online is False
     assert restored.accounts[0].conflict_policy == "kick"
+    assert restored.accounts[0].auto_reply_enabled is True
+    assert restored.accounts[0].auto_reply_message == "I am hour boosting right now."
+    assert restored.accounts[0].auto_reply_cooldown_seconds == 240
+    assert restored.accounts[0].auto_reply_timeout_seconds == 1800
     assert restored.accounts[0].games[0].app_id == 730
     assert restored.accounts[0].games[1].enabled is False
