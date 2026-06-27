@@ -62,6 +62,7 @@ const shellState = {
   maximized: false,
   bootstrap: fallbackState,
   authMode: 'credentials',
+  credentialGuardRequirement: null,
   selectedAccountProfileId: null,
   editorGames: [],
   pendingQrLogin: null,
@@ -107,6 +108,9 @@ async function hydrate() {
   fillSettings();
   fillAccountEditor();
   updateTopbarPill();
+  if (!shellState.credentialGuardRequirement) {
+    clearCredentialGuardRequirement();
+  }
   selectPage(shellState.currentPage, false);
   selectAuthMode(shellState.authMode);
 }
@@ -723,6 +727,10 @@ function selectAuthMode(mode) {
   document.querySelectorAll('.auth-panel').forEach((panel) => {
     panel.classList.toggle('is-active', panel.dataset.authPanel === shellState.authMode);
   });
+
+  if (shellState.authMode !== 'credentials') {
+    clearCredentialGuardRequirement();
+  }
 }
 
 async function loginWithCredentials() {
@@ -734,6 +742,19 @@ async function loginWithCredentials() {
     password: getValue('cred-password'),
     steam_guard_code: getValue('cred-guard-code'),
   });
+  if (result?.status === 'steam_guard_required') {
+    shellState.credentialGuardRequirement = result;
+    applyCredentialGuardRequirement(result);
+    setAuthStatus('info', result.message || 'Steam Guard code required.');
+    setButtonBusy('credentials-submit-button', false, 'Sign In With Credentials');
+    const button = document.getElementById('credentials-submit-button');
+    if (button) {
+      button.textContent = 'Submit Steam Guard Code';
+      button.dataset.defaultLabel = 'Submit Steam Guard Code';
+    }
+    return;
+  }
+  clearCredentialGuardRequirement();
   await handleMutationResult(result, {
     successMessage: result?.message || 'Credential login completed.',
     clearIds: ['cred-password', 'cred-guard-code'],
@@ -743,6 +764,7 @@ async function loginWithCredentials() {
 }
 
 async function loginWithRefreshToken() {
+  clearCredentialGuardRequirement();
   setButtonBusy('refresh-submit-button', true, 'Attaching...');
   setAuthStatus('info', 'Building a session from the provided refresh token.');
   const result = await callApi('login_account_with_refresh_token', {
@@ -758,6 +780,7 @@ async function loginWithRefreshToken() {
 }
 
 async function beginQrLogin() {
+  clearCredentialGuardRequirement();
   setButtonBusy('qr-start-button', true, 'Starting...');
   setAuthStatus('info', 'Creating a Steam QR login challenge.');
   const result = await callApi('begin_qr_account_login', {
@@ -879,6 +902,39 @@ function clearQrPanel() {
   }
   setButtonBusy('qr-start-button', false, 'Start QR Login');
   updateQrStatus('Approve the pending Steam sign-in request from your phone.');
+}
+
+function applyCredentialGuardRequirement(requirement) {
+  shellState.credentialGuardRequirement = requirement || null;
+  setText('cred-guard-code-label', requirement?.code_label || 'Steam Guard Code');
+  setText(
+    'cred-guard-helper',
+    requirement?.associated_message
+      ? `${requirement.message} Steam reported destination: ${requirement.associated_message}.`
+      : (requirement?.message || 'If Steam Guard is required, enter the code here and submit again.'),
+  );
+
+  const input = document.getElementById('cred-guard-code');
+  if (input) {
+    input.placeholder = requirement?.code_placeholder || 'Email or app code if required';
+    input.focus();
+    input.select();
+  }
+}
+
+function clearCredentialGuardRequirement() {
+  shellState.credentialGuardRequirement = null;
+  setText('cred-guard-code-label', 'Steam Guard Code');
+  setText('cred-guard-helper', 'If Steam Guard is required, enter the code here and submit again.');
+  const input = document.getElementById('cred-guard-code');
+  if (input) {
+    input.placeholder = 'Email or app code if required';
+  }
+  const button = document.getElementById('credentials-submit-button');
+  if (button && !button.disabled) {
+    button.textContent = 'Sign In With Credentials';
+    button.dataset.defaultLabel = 'Sign In With Credentials';
+  }
 }
 
 function updateQrStatus(text) {

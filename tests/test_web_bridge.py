@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from steamcommunitykit.exceptions import SteamAuthenticationError
 from steam_hour_booster.auth.community import AuthSession
 from steam_hour_booster.config_store import ConfigStore
 from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
@@ -114,6 +115,25 @@ class FakeAuthGateway:
         )
 
 
+class SteamGuardRequiredAuthGateway(FakeAuthGateway):
+    def login_with_credentials(self, account_name: str, password: str, **kwargs):
+        del kwargs
+        assert account_name == "primary_account"
+        assert password == "password123"
+        raise SteamAuthenticationError(
+            "A Steam Guard email code is required for this login (j***@example.com).",
+            status_code=401,
+            payload={
+                "allowed_confirmations": [
+                    {
+                        "confirmation_type": 2,
+                        "associated_message": "j***@example.com",
+                    }
+                ]
+            },
+        )
+
+
 class RecordingPathOpener:
     def __init__(self) -> None:
         self.paths = []
@@ -200,6 +220,32 @@ def test_credential_login_creates_account_and_bundle(tmp_path) -> None:
     assert result["account"]["steam_id"] == "7656119"
     assert Path(result["account"]["session_bundle_path"]).exists()
     assert store.load().accounts[0].display_name == "Primary"
+
+
+def test_credential_login_returns_structured_steam_guard_requirement(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    api = DesktopApi(
+        config_store=store,
+        config=AppConfig(),
+        auth_gateway=SteamGuardRequiredAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.login_account_with_credentials(
+        {
+            "display_name": "Primary",
+            "account_name": "primary_account",
+            "password": "password123",
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "steam_guard_required"
+    assert result["code_kind"] == "email"
+    assert result["code_label"] == "Steam Guard Email Code"
+    assert "j***@example.com" in result["code_placeholder"]
+    assert result["associated_message"] == "j***@example.com"
 
 
 def test_qr_flow_polls_then_creates_account(tmp_path) -> None:

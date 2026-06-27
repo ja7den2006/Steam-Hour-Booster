@@ -203,13 +203,13 @@ __INLINE_STYLES__
                       <input id="cred-password" type="password" placeholder="Steam password">
                     </label>
                     <label class="field">
-                      <span>Steam Guard Code</span>
-                      <input id="cred-guard-code" type="text" placeholder="Email or app code if required">
+                      <span id="cred-guard-code-label">Steam Guard Code</span>
+                      <input id="cred-guard-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Email or app code if required">
                     </label>
                   </div>
                   <div class="form-actions">
                     <button class="action-button" id="credentials-submit-button">Sign In With Credentials</button>
-                    <p class="helper-copy">If Steam Guard is required, enter the code here and submit again.</p>
+                    <p class="helper-copy" id="cred-guard-helper">If Steam Guard is required, enter the code here and submit again.</p>
                   </div>
                 </div>
 

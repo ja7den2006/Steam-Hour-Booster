@@ -172,6 +172,11 @@ class DesktopApi:
                 login_mode="credentials",
                 success_message="Credential login completed and session bundle saved.",
             )
+        except SteamAuthenticationError as exc:
+            steam_guard_result = self._steam_guard_required_result(exc)
+            if steam_guard_result is not None:
+                return steam_guard_result
+            return self._error_result(exc)
         except Exception as exc:
             return self._error_result(exc)
 
@@ -792,6 +797,70 @@ class DesktopApi:
             "message": "Unexpected error: %s" % message,
             "error_type": error_type,
         }
+
+    def _steam_guard_required_result(self, exc: SteamAuthenticationError) -> Optional[Dict[str, Any]]:
+        payload = getattr(exc, "payload", None)
+        if not isinstance(payload, dict):
+            return None
+
+        confirmation = self._select_steam_guard_confirmation(payload)
+        if confirmation is None:
+            return None
+
+        code_kind = self._steam_guard_code_kind(confirmation)
+        associated_message = self._normalize_optional_string(confirmation.get("associated_message"))
+        return {
+            "ok": False,
+            "status": "steam_guard_required",
+            "message": str(exc).strip() or "A Steam Guard code is required for this login.",
+            "error_type": exc.__class__.__name__,
+            "code_kind": code_kind,
+            "code_label": self._steam_guard_code_label(code_kind),
+            "code_placeholder": self._steam_guard_code_placeholder(code_kind, associated_message),
+            "associated_message": associated_message,
+        }
+
+    @staticmethod
+    def _select_steam_guard_confirmation(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        confirmations = payload.get("allowed_confirmations") or []
+        for preferred_type in (3, 2):
+            for confirmation in confirmations:
+                try:
+                    if int(confirmation.get("confirmation_type", 0)) == preferred_type:
+                        return confirmation
+                except Exception:
+                    continue
+        for confirmation in confirmations:
+            if confirmation.get("confirmation_type"):
+                return confirmation
+        return None
+
+    @staticmethod
+    def _steam_guard_code_kind(confirmation: Dict[str, Any]) -> str:
+        confirmation_type = int(confirmation.get("confirmation_type", 0) or 0)
+        if confirmation_type == 3:
+            return "app"
+        if confirmation_type == 2:
+            return "email"
+        return "generic"
+
+    @staticmethod
+    def _steam_guard_code_label(code_kind: str) -> str:
+        if code_kind == "app":
+            return "Steam Guard App Code"
+        if code_kind == "email":
+            return "Steam Guard Email Code"
+        return "Steam Guard Code"
+
+    @staticmethod
+    def _steam_guard_code_placeholder(code_kind: str, associated_message: str) -> str:
+        if code_kind == "app":
+            return "Enter the Steam mobile authenticator code"
+        if code_kind == "email" and associated_message:
+            return "Enter the email code sent to %s" % associated_message
+        if code_kind == "email":
+            return "Enter the Steam Guard email code"
+        return "Enter the required Steam Guard code"
 
     @staticmethod
     def _normalize_optional_string(value: Any) -> str:
