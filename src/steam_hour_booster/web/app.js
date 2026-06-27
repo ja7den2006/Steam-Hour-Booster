@@ -425,6 +425,7 @@ function fillAccounts() {
   }
 
   state.accounts.forEach((account) => {
+    const runtimeStatus = getRuntimeStatusByProfileId(account.profile_id);
     const item = document.createElement('div');
     item.className = `account-item${shellState.selectedAccountProfileId === account.profile_id ? ' account-item--selected' : ''}`;
     item.dataset.accountSelect = 'true';
@@ -442,10 +443,12 @@ function fillAccounts() {
       </div>
       <div class="account-item__meta">
         <div><span>Boost</span><strong>${account.boost_enabled ? 'Enabled' : 'Disabled'}</strong></div>
+        <div><span>Runtime</span><strong>${escapeHtml(runtimeStatus?.state_label || 'Pending')}</strong></div>
         <div><span>Presence</span><strong>${escapeHtml(account.effective_persona_state || account.persona_state || 'Online')}</strong></div>
         <div><span>Policy</span><strong>${escapeHtml(formatConflictPolicy(account.conflict_policy))}</strong></div>
         <div><span>Games</span><strong>${account.game_count}</strong></div>
-        <div><span>Session</span><strong>${account.has_session_bundle ? 'Saved' : 'Missing'}</strong></div>
+        <div><span>Session</span><strong>${runtimeStatus ? (runtimeStatus.session_ready ? 'Ready' : 'Missing') : (account.has_session_bundle ? 'Saved' : 'Missing')}</strong></div>
+        <div><span>Library</span><strong>${escapeHtml(runtimeStatus?.owned_games_validation_label || 'Pending')}</strong></div>
       </div>
       <div class="account-item__path">${escapeHtml(account.session_bundle_path || 'No session bundle file')}</div>
     `;
@@ -1257,10 +1260,14 @@ function getSelectedAccount() {
   ) || null;
 }
 
-function getSelectedRuntimeStatus() {
+function getRuntimeStatusByProfileId(profileId) {
   return (shellState.bootstrap.runtime?.statuses || []).find(
-    (status) => status.profile_id === shellState.selectedAccountProfileId,
+    (status) => status.profile_id === profileId,
   ) || null;
+}
+
+function getSelectedRuntimeStatus() {
+  return getRuntimeStatusByProfileId(shellState.selectedAccountProfileId);
 }
 
 async function saveAccountProfile() {

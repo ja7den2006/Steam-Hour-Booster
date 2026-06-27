@@ -108,7 +108,7 @@ __INLINE_STYLES__
               <article class="card stat-card">
                 <span class="stat-card__label">Auth modes</span>
                 <strong class="stat-card__value">4</strong>
-                <p>Credentials, app code, email code, and QR approval are planned as first-class onboarding paths.</p>
+                <p>Credentials, Steam Guard email or app code, refresh tokens, and QR approval are all supported in the onboarding flow.</p>
               </article>
               <article class="card stat-card">
                 <span class="stat-card__label">Configured slots</span>
@@ -375,6 +375,7 @@ __INLINE_STYLES__
                       <input id="editor-custom-status" type="text" placeholder="Optional custom non-Steam status">
                     </label>
                   </div>
+                  <p class="helper-copy">This stays as an operator-facing local status label. It is not sent to Steam as persona text by the current transport.</p>
 
                   <div class="game-slot-panel card card--embedded">
                     <div class="card-header">
