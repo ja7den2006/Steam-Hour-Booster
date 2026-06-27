@@ -471,7 +471,7 @@ textarea {
 
 .account-item__meta {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 10px;
 }
 
@@ -707,6 +707,84 @@ textarea {
   gap: 16px;
 }
 
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.toggle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(43, 52, 62, 0.96);
+  background: rgba(10, 15, 21, 0.62);
+  cursor: pointer;
+}
+
+.toggle-card__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.toggle-card__copy strong {
+  font-size: 13px;
+}
+
+.toggle-card__copy small {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.toggle-card__control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.toggle-card__control input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-card__indicator {
+  width: 56px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid rgba(58, 67, 79, 0.82);
+  background: rgba(149, 162, 180, 0.1);
+  position: relative;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.toggle-card__indicator::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #dbe4ef;
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.toggle-card__control input:checked + .toggle-card__indicator {
+  background: rgba(230, 138, 68, 0.18);
+  border-color: rgba(230, 138, 68, 0.52);
+}
+
+.toggle-card__control input:checked + .toggle-card__indicator::after {
+  transform: translateX(24px);
+  background: #ffd2a8;
+}
+
 .field select {
   width: 100%;
   border-radius: 16px;
@@ -722,8 +800,63 @@ textarea {
   box-shadow: 0 0 0 3px rgba(230, 138, 68, 0.14);
 }
 
+.field select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .editor-session {
   margin-top: 4px;
+}
+
+.game-slot-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.game-slot-empty {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px dashed rgba(55, 65, 76, 0.98);
+  color: var(--text-soft);
+  background: rgba(9, 13, 18, 0.62);
+}
+
+.game-slot-empty--hidden {
+  display: none;
+}
+
+.game-slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.game-slot-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(9, 13, 18, 0.92);
+  border: 1px solid rgba(35, 43, 53, 0.96);
+}
+
+.game-slot-item__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.game-slot-item__copy strong {
+  font-size: 13px;
+}
+
+.game-slot-item__copy small {
+  color: var(--text-soft);
+  font-size: 12px;
 }
 
 .runtime-control-card {
@@ -997,6 +1130,7 @@ textarea {
 
 @media (max-width: 1080px) {
   .form-grid,
+  .toggle-grid,
   .qr-panel,
   .runtime-summary-grid,
   .runtime-account__meta {

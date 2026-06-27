@@ -22,9 +22,11 @@ from steam_hour_booster.models import (
     CONFLICT_POLICIES,
     CONFLICT_POLICY_KICK,
     CONFLICT_POLICY_PAUSE,
+    CONFLICT_POLICY_YIELD,
     AccountProfile,
     AppConfig,
     IdleGame,
+    VISIBLE_PERSONA_STATES,
 )
 from steam_hour_booster.runtime import RuntimeController, RuntimeState
 from steam_hour_booster.session_store import SessionStore
@@ -39,16 +41,8 @@ class PendingQRLoginRecord:
     poll_attempts: int = 0
 
 
-PERSONA_STATES = [
-    "Online",
-    "Busy",
-    "Away",
-    "Snooze",
-    "LookingToTrade",
-    "LookingToPlay",
-    "Invisible",
-    "Offline",
-]
+PERSONA_STATES = list(VISIBLE_PERSONA_STATES)
+ALL_PERSONA_STATES = PERSONA_STATES + ["Invisible", "Offline"]
 
 CONFLICT_POLICY_OPTIONS = [
     {
@@ -61,6 +55,22 @@ CONFLICT_POLICY_OPTIONS = [
         "label": "Force Kick",
         "description": "Ask Steam to remove the other playing session and reclaim the lane.",
     },
+    {
+        "value": CONFLICT_POLICY_YIELD,
+        "label": "Yield to New Session",
+        "description": "Stand this lane down when another Steam playing session takes priority.",
+    },
+]
+
+POPULAR_GAMES = [
+    {"app_id": 730, "title": "Counter-Strike 2"},
+    {"app_id": 570, "title": "Dota 2"},
+    {"app_id": 252490, "title": "Rust"},
+    {"app_id": 440, "title": "Team Fortress 2"},
+    {"app_id": 578080, "title": "PUBG: BATTLEGROUNDS"},
+    {"app_id": 4000, "title": "Garry's Mod"},
+    {"app_id": 271590, "title": "Grand Theft Auto V"},
+    {"app_id": 1172470, "title": "Apex Legends"},
 ]
 
 
@@ -124,7 +134,7 @@ class DesktopApi:
             "accounts": [self._serialize_account(account) for account in self._config.accounts],
             "runtime": {
                 "slot_ceiling": 32,
-                "conflict_policy": "Per-account policy with pause or force-kick",
+                "conflict_policy": "Per-account policy with pause, force-kick, or yield",
                 "reconnect_posture": "Backoff and resume",
                 **runtime_snapshot,
             },
@@ -133,6 +143,7 @@ class DesktopApi:
             },
             "persona_states": list(PERSONA_STATES),
             "conflict_policies": list(CONFLICT_POLICY_OPTIONS),
+            "popular_games": list(POPULAR_GAMES),
         }
 
     def set_last_page(self, page_key: str) -> Dict[str, Any]:
@@ -312,6 +323,8 @@ class DesktopApi:
                 or account.steam_id
                 or account.profile_id
             )
+            boost_enabled = self._normalize_bool(values.get("boost_enabled"), default=account.boost_enabled)
+            appear_online = self._normalize_bool(values.get("appear_online"), default=account.appear_online)
             persona_state = self._normalize_persona_state(values.get("persona_state"))
             conflict_policy = self._normalize_conflict_policy(values.get("conflict_policy"))
             custom_status = self._normalize_optional_string(values.get("custom_status"))
@@ -324,6 +337,8 @@ class DesktopApi:
                 account_name=account.account_name,
                 steam_id=account.steam_id,
                 login_mode=account.login_mode,
+                boost_enabled=boost_enabled,
+                appear_online=appear_online,
                 persona_state=persona_state,
                 conflict_policy=conflict_policy,
                 custom_status=custom_status,
@@ -348,7 +363,15 @@ class DesktopApi:
                 RuntimeState.BOOSTING,
                 RuntimeState.PAUSED,
             ):
-                if updated.games:
+                if not updated.boost_enabled:
+                    runtime_status = self._runtime_controller.stop_profile(
+                        updated.profile_id,
+                        self._config.accounts,
+                    )
+                    success_message = (
+                        "Account profile saved and the active lane was stopped because boosting is disabled."
+                    )
+                elif updated.games:
                     runtime_status = self._runtime_controller.reconfigure_profile(
                         updated.profile_id,
                         self._config.accounts,
@@ -645,6 +668,8 @@ class DesktopApi:
             (session.account_name or "").strip()
             or (existing.account_name if existing else "")
         )
+        boost_enabled = existing.boost_enabled if existing else True
+        appear_online = existing.appear_online if existing else True
         persona_state = existing.persona_state if existing else "Online"
         conflict_policy = existing.conflict_policy if existing else CONFLICT_POLICY_PAUSE
         custom_status = existing.custom_status if existing else ""
@@ -657,6 +682,8 @@ class DesktopApi:
             account_name=resolved_account_name,
             steam_id=steam_id,
             login_mode=login_mode,
+            boost_enabled=boost_enabled,
+            appear_online=appear_online,
             persona_state=persona_state,
             conflict_policy=conflict_policy,
             custom_status=custom_status,
@@ -746,7 +773,7 @@ class DesktopApi:
 
     def _normalize_persona_state(self, value: Any) -> str:
         normalized = self._normalize_optional_string(value) or "Online"
-        if normalized not in PERSONA_STATES:
+        if normalized not in ALL_PERSONA_STATES:
             raise SteamValidationError("Persona state is invalid.")
         return normalized
 
@@ -755,6 +782,28 @@ class DesktopApi:
         if normalized not in CONFLICT_POLICIES:
             raise SteamValidationError("Conflict policy is invalid.")
         return normalized
+
+    @staticmethod
+    def _normalize_bool(value: Any, *, default: bool = False) -> bool:
+        if value is None:
+            return bool(default)
+        if isinstance(value, bool):
+            return value
+        normalized = str(value).strip().lower()
+        if normalized in ("1", "true", "yes", "on"):
+            return True
+        if normalized in ("0", "false", "no", "off"):
+            return False
+        return bool(default)
+
+    @staticmethod
+    def _effective_persona_state(account: AccountProfile) -> str:
+        if not account.appear_online:
+            return "Invisible"
+        persona_state = str(account.persona_state or "").strip() or "Online"
+        if persona_state in ("Invisible", "Offline"):
+            return "Online"
+        return persona_state
 
     def _parse_games_text(self, raw_value: Any) -> List[IdleGame]:
         text = self._normalize_optional_string(raw_value)
@@ -839,7 +888,10 @@ class DesktopApi:
             "account_name": account.account_name,
             "steam_id": account.steam_id,
             "login_mode": account.login_mode,
+            "boost_enabled": account.boost_enabled,
+            "appear_online": account.appear_online,
             "persona_state": account.persona_state,
+            "effective_persona_state": self._effective_persona_state(account),
             "conflict_policy": account.conflict_policy,
             "custom_status": account.custom_status,
             "notes": account.notes,

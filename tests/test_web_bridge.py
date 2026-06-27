@@ -151,6 +151,7 @@ def test_bootstrap_state_includes_counts_and_paths(tmp_path) -> None:
     assert state["build"]["desktop_stack"] == "pywebview + HTML/CSS/JS"
     assert "Online" in state["persona_states"]
     assert any(item["value"] == "kick" for item in state["conflict_policies"])
+    assert any(item["app_id"] == 730 for item in state["popular_games"])
     assert state["paths"]["config"] == str(store.path)
     assert state["paths"]["sessions"] == str(session_store.base_dir)
     assert state["runtime"]["event_log_path"].endswith("runtime.log")
@@ -279,6 +280,8 @@ def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
         {
             "profile_id": "steam_7656119",
             "display_name": "Primary Updated",
+            "boost_enabled": False,
+            "appear_online": False,
             "persona_state": "Invisible",
             "conflict_policy": "kick",
             "custom_status": "Boosting quietly",
@@ -290,12 +293,15 @@ def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
     assert result["ok"] is True
     saved = store.load().accounts[0]
     assert saved.display_name == "Primary Updated"
+    assert saved.boost_enabled is False
+    assert saved.appear_online is False
     assert saved.persona_state == "Invisible"
     assert saved.conflict_policy == "kick"
     assert saved.custom_status == "Boosting quietly"
     assert saved.notes == "Night queue"
     assert len(saved.games) == 2
     assert saved.games[0].title == "Counter-Strike 2"
+    assert result["account"]["effective_persona_state"] == "Invisible"
 
 
 def test_save_account_profile_reconfigures_active_preview_lane(tmp_path) -> None:
@@ -339,6 +345,52 @@ def test_save_account_profile_reconfigures_active_preview_lane(tmp_path) -> None
     runtime_status = saved["state"]["runtime"]["statuses"][0]
     assert runtime_status["state"] == "boosting"
     assert runtime_status["active_app_ids"] == [730, 570]
+
+
+def test_save_account_profile_disables_active_preview_lane(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                account_name="primary_account",
+                steam_id="7656119",
+                login_mode="credentials",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+        runtime_controller=preview_runtime_controller(session_store),
+    )
+
+    started = api.start_account_runtime("steam_7656119")
+    saved = api.save_account_profile(
+        {
+            "profile_id": "steam_7656119",
+            "display_name": "Primary",
+            "boost_enabled": False,
+            "appear_online": False,
+            "persona_state": "Online",
+            "games_text": "730: Counter-Strike 2",
+        }
+    )
+
+    assert started["ok"] is True
+    assert saved["ok"] is True
+    assert "disabled" in saved["message"].lower()
+    runtime_status = saved["state"]["runtime"]["statuses"][0]
+    assert runtime_status["state"] == "idle"
+    assert runtime_status["boost_enabled"] is False
+    assert runtime_status["can_start"] is False
 
 
 def test_save_account_profile_rejects_too_many_slots(tmp_path) -> None:

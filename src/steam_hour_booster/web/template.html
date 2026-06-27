@@ -302,7 +302,7 @@ __INLINE_STYLES__
                   <span class="pill pill--subtle" id="account-editor-slot-pill">0 slots</span>
                 </div>
                 <p class="card-copy">
-                  Configure the parts of each account that will matter when the live runtime is attached: persona state, custom status, slot list, and operator notes.
+                  Configure the parts of each account that matter once the live runtime is attached: boost availability, visible presence, session priority, slot list, and operator notes.
                 </p>
 
                 <div class="status-banner status-banner--hidden" id="account-editor-status"></div>
@@ -312,13 +312,37 @@ __INLINE_STYLES__
                 </div>
 
                 <div class="editor-shell editor-shell--hidden" id="account-editor-shell">
+                  <div class="toggle-grid">
+                    <label class="toggle-card" for="editor-boost-enabled">
+                      <span class="toggle-card__copy">
+                        <strong>Booster Enabled</strong>
+                        <small>Allow this account to participate in runtime start sweeps and manual starts.</small>
+                      </span>
+                      <span class="toggle-card__control">
+                        <input id="editor-boost-enabled" type="checkbox">
+                        <span class="toggle-card__indicator"></span>
+                      </span>
+                    </label>
+
+                    <label class="toggle-card" for="editor-appear-online">
+                      <span class="toggle-card__copy">
+                        <strong>Appear Online While Boosting</strong>
+                        <small>Turn this off to force the account into an invisible/offline posture while the lane is active.</small>
+                      </span>
+                      <span class="toggle-card__control">
+                        <input id="editor-appear-online" type="checkbox">
+                        <span class="toggle-card__indicator"></span>
+                      </span>
+                    </label>
+                  </div>
+
                   <div class="form-grid">
                     <label class="field">
                       <span>Display Name</span>
                       <input id="editor-display-name" type="text" placeholder="Primary account">
                     </label>
                     <label class="field">
-                      <span>Persona State</span>
+                      <span>Visible Presence</span>
                       <select id="editor-persona-state"></select>
                     </label>
                   </div>
@@ -340,7 +364,7 @@ __INLINE_STYLES__
                       <input id="editor-login-mode" type="text" readonly>
                     </label>
                     <label class="field">
-                      <span>Conflict Policy</span>
+                      <span>Session Priority Policy</span>
                       <select id="editor-conflict-policy"></select>
                     </label>
                   </div>
@@ -354,10 +378,47 @@ __INLINE_STYLES__
 
                   <div class="form-grid">
                     <label class="field field--wide">
-                      <span>Game Slots</span>
-                      <textarea id="editor-games-text" rows="7" placeholder="730: Counter-Strike 2&#10;570: Dota 2&#10;440"></textarea>
+                      <span>Popular Preset</span>
+                      <select id="editor-preset-game"></select>
                     </label>
                   </div>
+
+                  <div class="form-actions">
+                    <button class="secondary-button" id="editor-add-preset-button">Add Preset Slot</button>
+                    <p class="helper-copy">Preset entries cover common games fast, while custom entries let you add any Steam app id.</p>
+                  </div>
+
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Custom App ID</span>
+                      <input id="editor-custom-app-id" type="text" inputmode="numeric" placeholder="730">
+                    </label>
+                    <label class="field">
+                      <span>Display Label</span>
+                      <input id="editor-custom-game-title" type="text" placeholder="Counter-Strike 2">
+                    </label>
+                  </div>
+
+                  <div class="form-actions">
+                    <button class="action-button" id="editor-add-custom-game-button">Add Custom Slot</button>
+                    <p class="helper-copy">Each account can queue up to 32 game slots. Duplicate app IDs are ignored.</p>
+                  </div>
+
+                  <div class="game-slot-panel card card--embedded">
+                    <div class="card-header">
+                      <div>
+                        <div class="eyebrow">GAME SLOT LIST</div>
+                        <h3>Current boost queue</h3>
+                      </div>
+                      <span class="pill pill--subtle" id="editor-games-count-pill">0 slots</span>
+                    </div>
+                    <div class="game-slot-empty" id="editor-games-empty">
+                      No game slots added yet. Use a preset or add a custom app id.
+                    </div>
+                    <div class="game-slot-list" id="editor-games-list"></div>
+                  </div>
+
+                  <textarea id="editor-games-text" hidden></textarea>
 
                   <div class="form-grid">
                     <label class="field field--wide">
@@ -385,7 +446,7 @@ __INLINE_STYLES__
 
                   <div class="form-actions">
                     <button class="action-button" id="account-save-button">Save Account Settings</button>
-                    <p class="helper-copy">Game slots accept one app id per line, or `app_id: Title` if you want a label shown in the shell.</p>
+                    <p class="helper-copy">Visible presence applies only when online boosting is enabled. Turning that off forces the runtime to stay invisible.</p>
                   </div>
                 </div>
               </article>

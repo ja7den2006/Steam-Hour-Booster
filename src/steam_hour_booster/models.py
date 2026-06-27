@@ -5,9 +5,20 @@ from typing import Any, Dict, List, Optional
 
 CONFLICT_POLICY_PAUSE = "pause"
 CONFLICT_POLICY_KICK = "kick"
+CONFLICT_POLICY_YIELD = "yield"
 CONFLICT_POLICIES = (
     CONFLICT_POLICY_PAUSE,
     CONFLICT_POLICY_KICK,
+    CONFLICT_POLICY_YIELD,
+)
+
+VISIBLE_PERSONA_STATES = (
+    "Online",
+    "Busy",
+    "Away",
+    "Snooze",
+    "LookingToTrade",
+    "LookingToPlay",
 )
 
 
@@ -40,6 +51,8 @@ class AccountProfile:
     account_name: str = ""
     steam_id: str = ""
     login_mode: str = "credentials"
+    boost_enabled: bool = True
+    appear_online: bool = True
     persona_state: str = "Online"
     conflict_policy: str = CONFLICT_POLICY_PAUSE
     custom_status: str = ""
@@ -54,6 +67,8 @@ class AccountProfile:
             "account_name": self.account_name,
             "steam_id": self.steam_id,
             "login_mode": self.login_mode,
+            "boost_enabled": bool(self.boost_enabled),
+            "appear_online": bool(self.appear_online),
             "persona_state": self.persona_state,
             "conflict_policy": self.conflict_policy,
             "custom_status": self.custom_status,
@@ -70,6 +85,8 @@ class AccountProfile:
             account_name=str(payload.get("account_name", "")),
             steam_id=str(payload.get("steam_id", "")),
             login_mode=str(payload.get("login_mode", "credentials")),
+            boost_enabled=bool(payload.get("boost_enabled", True)),
+            appear_online=bool(payload.get("appear_online", True)),
             persona_state=str(payload.get("persona_state", "Online")),
             conflict_policy=str(payload.get("conflict_policy", CONFLICT_POLICY_PAUSE)),
             custom_status=str(payload.get("custom_status", "")),

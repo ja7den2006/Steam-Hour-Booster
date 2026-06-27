@@ -22,13 +22,15 @@ const fallbackState = {
     height: 920,
   },
   accounts: [],
+  popular_games: [],
   conflict_policies: [
     { value: 'pause', label: 'Pause and Wait' },
     { value: 'kick', label: 'Force Kick' },
+    { value: 'yield', label: 'Yield to New Session' },
   ],
   runtime: {
     slot_ceiling: 32,
-    conflict_policy: 'Per-account policy with pause or force-kick',
+    conflict_policy: 'Per-account policy with pause, force-kick, or yield',
     reconnect_posture: 'Backoff and resume',
     transport_name: 'valvepython-steam',
     preview_mode: false,
@@ -58,6 +60,7 @@ const shellState = {
   bootstrap: fallbackState,
   authMode: 'credentials',
   selectedAccountProfileId: null,
+  editorGames: [],
   pendingQrLogin: null,
   qrPollTimer: null,
   runtimePollTimer: null,
@@ -254,6 +257,34 @@ function bindAccountActions() {
   if (openSessionButton) {
     openSessionButton.addEventListener('click', openSelectedSessionBundle);
   }
+
+  const addPresetButton = document.getElementById('editor-add-preset-button');
+  if (addPresetButton) {
+    addPresetButton.addEventListener('click', addPresetGameToEditor);
+  }
+
+  const addCustomGameButton = document.getElementById('editor-add-custom-game-button');
+  if (addCustomGameButton) {
+    addCustomGameButton.addEventListener('click', addCustomGameToEditor);
+  }
+
+  const gameList = document.getElementById('editor-games-list');
+  if (gameList) {
+    gameList.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-game-remove-app-id]');
+      if (!target?.dataset.gameRemoveAppId) {
+        return;
+      }
+      removeEditorGame(Number(target.dataset.gameRemoveAppId));
+    });
+  }
+
+  const appearOnlineToggle = document.getElementById('editor-appear-online');
+  if (appearOnlineToggle) {
+    appearOnlineToggle.addEventListener('change', () => {
+      updatePresenceEditorState();
+    });
+  }
 }
 
 function bindRuntimeActions() {
@@ -396,7 +427,8 @@ function fillAccounts() {
         </div>
       </div>
       <div class="account-item__meta">
-        <div><span>Persona</span><strong>${escapeHtml(account.persona_state)}</strong></div>
+        <div><span>Boost</span><strong>${account.boost_enabled ? 'Enabled' : 'Disabled'}</strong></div>
+        <div><span>Presence</span><strong>${escapeHtml(account.effective_persona_state || account.persona_state || 'Online')}</strong></div>
         <div><span>Policy</span><strong>${escapeHtml(formatConflictPolicy(account.conflict_policy))}</strong></div>
         <div><span>Games</span><strong>${account.game_count}</strong></div>
         <div><span>Session</span><strong>${account.has_session_bundle ? 'Saved' : 'Missing'}</strong></div>
@@ -414,6 +446,7 @@ function fillAccountEditor() {
 
   hydratePersonaOptions();
   hydrateConflictPolicyOptions();
+  hydratePopularGameOptions();
 
   if (!profile) {
     if (editorShell) {
@@ -424,6 +457,8 @@ function fillAccountEditor() {
     }
     setText('account-editor-title', 'Runtime-ready account settings');
     setText('account-editor-slot-pill', '0 slots');
+    shellState.editorGames = [];
+    renderEditorGames();
     return;
   }
 
@@ -437,6 +472,8 @@ function fillAccountEditor() {
   setText('account-editor-title', profile.display_name || profile.account_name || profile.steam_id);
   setText('account-editor-slot-pill', `${profile.game_count} slot${profile.game_count === 1 ? '' : 's'}`);
 
+  setChecked('editor-boost-enabled', Boolean(profile.boost_enabled));
+  setChecked('editor-appear-online', profile.appear_online !== false);
   setInputValue('editor-display-name', profile.display_name || '');
   setInputValue('editor-account-name', profile.account_name || '');
   setInputValue('editor-steam-id', profile.steam_id || '');
@@ -446,6 +483,18 @@ function fillAccountEditor() {
   setInputValue('editor-notes', profile.notes || '');
   setSelectValue('editor-persona-state', profile.persona_state || 'Online');
   setSelectValue('editor-conflict-policy', profile.conflict_policy || 'pause');
+  setInputValue('editor-custom-app-id', '');
+  setInputValue('editor-custom-game-title', '');
+
+  shellState.editorGames = Array.isArray(profile.games)
+    ? profile.games.map((game) => ({
+        app_id: Number(game.app_id),
+        title: game.title || '',
+        enabled: game.enabled !== false,
+      }))
+    : [];
+  renderEditorGames();
+  updatePresenceEditorState();
 
   const sessionSummary = profile.session_summary || {};
   setText('editor-session-path', profile.session_bundle_path || 'No session bundle file');
@@ -507,7 +556,7 @@ function fillRuntimeAccounts(statuses) {
       <div class="runtime-account__header">
         <div>
           <div class="runtime-account__title">${escapeHtml(status.display_name)}</div>
-          <div class="runtime-account__subtitle">${escapeHtml(status.login_mode || 'unknown')} • ${escapeHtml(status.persona_state || 'Online')}</div>
+          <div class="runtime-account__subtitle">${escapeHtml(status.login_mode || 'unknown')} • ${escapeHtml(status.effective_persona_state || status.persona_state || 'Online')}</div>
         </div>
         <div class="runtime-account__actions">
           <span class="runtime-state runtime-state--${escapeHtml(status.state)}">${escapeHtml(status.state_label || status.state)}</span>
@@ -516,6 +565,10 @@ function fillRuntimeAccounts(statuses) {
         </div>
       </div>
       <div class="runtime-account__meta">
+        <div>
+          <span>Boost</span>
+          <strong>${status.boost_enabled ? 'Enabled' : 'Disabled'}</strong>
+        </div>
         <div>
           <span>Configured</span>
           <strong>${status.configured_slot_count}</strong>
@@ -886,6 +939,18 @@ function setInputValue(id, value) {
   }
 }
 
+function setChecked(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.checked = Boolean(value);
+  }
+}
+
+function getChecked(id) {
+  const element = document.getElementById(id);
+  return element ? Boolean(element.checked) : false;
+}
+
 function setSelectValue(id, value) {
   const element = document.getElementById(id);
   if (element) {
@@ -923,6 +988,135 @@ function hydrateConflictPolicyOptions() {
   });
 }
 
+function hydratePopularGameOptions() {
+  const select = document.getElementById('editor-preset-game');
+  if (!select) {
+    return;
+  }
+  const currentValue = select.value;
+  const games = shellState.bootstrap.popular_games || [];
+  select.innerHTML = '';
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Select a popular game preset';
+  select.appendChild(placeholder);
+
+  games.forEach((game) => {
+    const option = document.createElement('option');
+    option.value = String(game.app_id);
+    option.textContent = `${game.app_id} (${game.title})`;
+    option.dataset.title = game.title || '';
+    select.appendChild(option);
+  });
+
+  if (currentValue && Array.from(select.options).some((option) => option.value === currentValue)) {
+    select.value = currentValue;
+  }
+}
+
+function updatePresenceEditorState() {
+  const appearOnline = document.getElementById('editor-appear-online');
+  const personaState = document.getElementById('editor-persona-state');
+  if (!appearOnline || !personaState) {
+    return;
+  }
+  personaState.disabled = !appearOnline.checked;
+}
+
+function renderEditorGames() {
+  const list = document.getElementById('editor-games-list');
+  const empty = document.getElementById('editor-games-empty');
+  if (!list || !empty) {
+    return;
+  }
+
+  syncEditorGamesTextField();
+  list.innerHTML = '';
+
+  const games = shellState.editorGames || [];
+  setText('editor-games-count-pill', `${games.length} slot${games.length === 1 ? '' : 's'}`);
+  setText('account-editor-slot-pill', `${games.length} slot${games.length === 1 ? '' : 's'}`);
+
+  if (!games.length) {
+    empty.classList.remove('game-slot-empty--hidden');
+    return;
+  }
+
+  empty.classList.add('game-slot-empty--hidden');
+  games.forEach((game) => {
+    const item = document.createElement('div');
+    item.className = 'game-slot-item';
+    item.innerHTML = `
+      <div class="game-slot-item__copy">
+        <strong>${escapeHtml(game.title || `App ${game.app_id}`)}</strong>
+        <small>${escapeHtml(String(game.app_id))}</small>
+      </div>
+      <button class="ghost-button" data-game-remove-app-id="${escapeHtml(String(game.app_id))}">Remove</button>
+    `;
+    list.appendChild(item);
+  });
+}
+
+function syncEditorGamesTextField() {
+  const lines = (shellState.editorGames || []).map((game) => (
+    game.title ? `${game.app_id}: ${game.title}` : String(game.app_id)
+  ));
+  setInputValue('editor-games-text', lines.join('\n'));
+}
+
+function addGameToEditor(appId, title = '') {
+  const numericAppId = Number(appId || 0);
+  if (!Number.isInteger(numericAppId) || numericAppId <= 0) {
+    setEditorStatus('error', 'Game app IDs must be positive integers.');
+    return;
+  }
+
+  const existing = (shellState.editorGames || []).some((game) => Number(game.app_id) === numericAppId);
+  if (existing) {
+    setEditorStatus('info', `App ${numericAppId} is already in this account queue.`);
+    return;
+  }
+
+  if ((shellState.editorGames || []).length >= 32) {
+    setEditorStatus('error', 'A single account can only queue up to 32 game slots.');
+    return;
+  }
+
+  shellState.editorGames = [
+    ...(shellState.editorGames || []),
+    {
+      app_id: numericAppId,
+      title: String(title || '').trim(),
+      enabled: true,
+    },
+  ];
+  renderEditorGames();
+  setEditorStatus('success', `Added app ${numericAppId} to the boost queue.`);
+}
+
+function addPresetGameToEditor() {
+  const select = document.getElementById('editor-preset-game');
+  if (!select?.value) {
+    setEditorStatus('error', 'Select a preset game first.');
+    return;
+  }
+  const selected = select.options[select.selectedIndex];
+  addGameToEditor(Number(select.value), selected?.dataset.title || '');
+}
+
+function addCustomGameToEditor() {
+  addGameToEditor(getValue('editor-custom-app-id'), getValue('editor-custom-game-title'));
+  setInputValue('editor-custom-app-id', '');
+  setInputValue('editor-custom-game-title', '');
+}
+
+function removeEditorGame(appId) {
+  shellState.editorGames = (shellState.editorGames || []).filter((game) => Number(game.app_id) !== Number(appId));
+  renderEditorGames();
+  setEditorStatus('info', `Removed app ${appId} from the boost queue.`);
+}
+
 function getSelectedAccount() {
   return (shellState.bootstrap.accounts || []).find(
     (account) => account.profile_id === shellState.selectedAccountProfileId,
@@ -938,9 +1132,12 @@ async function saveAccountProfile() {
 
   setButtonBusy('account-save-button', true, 'Saving...');
   setEditorStatus('info', 'Saving account settings.');
+  syncEditorGamesTextField();
   const result = await callApi('save_account_profile', {
     profile_id: profile.profile_id,
     display_name: getValue('editor-display-name'),
+    boost_enabled: getChecked('editor-boost-enabled'),
+    appear_online: getChecked('editor-appear-online'),
     persona_state: getValue('editor-persona-state'),
     conflict_policy: getValue('editor-conflict-policy'),
     custom_status: getValue('editor-custom-status'),
@@ -1119,6 +1316,9 @@ function formatRuntimeAuthSource(source) {
 function formatConflictPolicy(policy) {
   if (policy === 'kick') {
     return 'Force Kick';
+  }
+  if (policy === 'yield') {
+    return 'Yield to New Session';
   }
   return 'Pause and Wait';
 }

@@ -129,6 +129,33 @@ def test_runtime_controller_flags_missing_sessions_and_empty_slots(tmp_path) -> 
     assert snapshot["counts"]["error_accounts"] >= 1
 
 
+def test_runtime_controller_keeps_disabled_accounts_idle(tmp_path) -> None:
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    controller = build_preview_controller(session_store)
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        steam_id="7656119",
+        boost_enabled=False,
+        appear_online=False,
+        session_bundle_path=str(bundle_path),
+        games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+    )
+
+    snapshot = controller.refresh_accounts([account]).to_dict()
+    status = snapshot["statuses"][0]
+    started = controller.start_profile("steam_7656119", [account])
+
+    assert status["state"] == "idle"
+    assert status["boost_enabled"] is False
+    assert status["effective_persona_state"] == "Invisible"
+    assert status["can_start"] is False
+    assert snapshot["counts"]["disabled_accounts"] == 1
+    assert started.state == RuntimeState.IDLE
+    assert "disabled" in started.message.lower()
+
+
 def test_refresh_token_client_login_builds_client_logon_message() -> None:
     steam_id = "76561197960287930"
 
@@ -637,3 +664,104 @@ def test_live_runtime_kicks_blocking_session_and_recovers(tmp_path) -> None:
     assert recovered.state == RuntimeState.BOOSTING
     assert recovered.blocked_by_playing_session is False
     assert created_clients[0].played_calls[-1] == [730, 570]
+
+
+def test_live_runtime_yields_to_newer_session(tmp_path) -> None:
+    steam_id = "76561197960287930"
+    created_clients = []
+
+    class YieldingLiveClient:
+        def __init__(self):
+            self.connected = False
+            self.logged_on = False
+            self.played_calls = []
+            self._handlers = {}
+            created_clients.append(self)
+
+        def on(self, event, callback):
+            self._handlers.setdefault(event, []).append(callback)
+
+        def emit_playing_state(self, *, blocked: bool, app_id: int):
+            body = type("Body", (), {"playing_blocked": blocked, "playing_app": app_id})()
+            message = type("Message", (), {"body": body})()
+            for callback in self._handlers.get(EMsg.ClientPlayingSessionState, []):
+                callback(message)
+
+        def set_credential_location(self, path):
+            self.credential_location = path
+
+        def login_with_refresh_token(self, refresh_token, steam_id, account_name=""):
+            self.connected = True
+            self.logged_on = True
+            self.refresh_token = refresh_token
+            self.account_name = account_name
+            return EResult.OK
+
+        def change_status(self, **kwargs):
+            return None
+
+        def games_played(self, app_ids):
+            self.played_calls.append(list(app_ids))
+
+        def sleep(self, seconds):
+            time.sleep(0.01)
+
+        def logout(self):
+            self.logged_on = False
+            self.connected = False
+
+        def disconnect(self):
+            self.connected = False
+
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    refresh_token = build_client_refresh_token(steam_id)
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {"steam_id": steam_id, "refresh_token": refresh_token},
+    )
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        account_name="primary_account",
+        steam_id=steam_id,
+        session_bundle_path=str(bundle_path),
+        conflict_policy="yield",
+        games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+    )
+    runtime = SteamNetworkBoosterRuntime(
+        session_store=session_store,
+        client_factory=YieldingLiveClient,
+        start_timeout=2.0,
+        sleep_interval=0.01,
+    )
+
+    runtime.start(account, session_store.load_bundle_path(str(bundle_path)))
+    created_clients[0].emit_playing_state(blocked=True, app_id=570)
+
+    yielded = None
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        yielded = runtime.inspect().get("steam_7656119")
+        if yielded and yielded.state == RuntimeState.IDLE and yielded.blocked_by_playing_session:
+            break
+        time.sleep(0.02)
+
+    created_clients[0].emit_playing_state(blocked=False, app_id=0)
+
+    cleared = None
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        cleared = runtime.inspect().get("steam_7656119")
+        if cleared and cleared.state == RuntimeState.IDLE and not cleared.blocked_by_playing_session:
+            break
+        time.sleep(0.02)
+
+    runtime.stop("steam_7656119")
+
+    assert yielded is not None
+    assert yielded.state == RuntimeState.IDLE
+    assert yielded.blocked_app_id == 570
+    assert created_clients[0].played_calls[-1] == []
+    assert cleared is not None
+    assert cleared.state == RuntimeState.IDLE
+    assert cleared.blocked_by_playing_session is False

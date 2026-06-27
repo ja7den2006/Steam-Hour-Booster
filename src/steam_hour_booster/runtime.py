@@ -13,6 +13,7 @@ from typing import Callable, Dict, List, Optional, Protocol
 from steam_hour_booster.models import (
     CONFLICT_POLICY_KICK,
     CONFLICT_POLICY_PAUSE,
+    CONFLICT_POLICY_YIELD,
     AccountProfile,
 )
 from steam_hour_booster.session_store import SessionStore
@@ -45,7 +46,18 @@ def _iso_timestamp() -> str:
 def _conflict_policy_label(policy: str) -> str:
     if policy == CONFLICT_POLICY_KICK:
         return "Force Kick"
+    if policy == CONFLICT_POLICY_YIELD:
+        return "Yield to New Session"
     return "Pause and Wait"
+
+
+def _effective_persona_state(persona_state: str, appear_online: bool) -> str:
+    if not appear_online:
+        return "Invisible"
+    normalized = str(persona_state or "").strip() or "Online"
+    if normalized in ("Invisible", "Offline"):
+        return "Online"
+    return normalized
 
 
 class RuntimeState(str, Enum):
@@ -64,7 +76,10 @@ class AccountRuntimeStatus:
     state: RuntimeState = RuntimeState.IDLE
     session_ready: bool = False
     login_mode: str = ""
+    boost_enabled: bool = True
+    appear_online: bool = True
     persona_state: str = "Online"
+    effective_persona_state: str = "Online"
     conflict_policy: str = CONFLICT_POLICY_PAUSE
     session_bundle_path: str = ""
     configured_app_ids: List[int] = field(default_factory=list)
@@ -81,7 +96,8 @@ class AccountRuntimeStatus:
 
     def to_dict(self) -> Dict[str, object]:
         can_start = (
-            self.session_ready
+            self.boost_enabled
+            and self.session_ready
             and bool(self.configured_app_ids)
             and self.state not in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED)
         )
@@ -93,7 +109,10 @@ class AccountRuntimeStatus:
             "state_label": self.state.value.replace("_", " ").title(),
             "session_ready": self.session_ready,
             "login_mode": self.login_mode,
+            "boost_enabled": self.boost_enabled,
+            "appear_online": self.appear_online,
             "persona_state": self.persona_state,
+            "effective_persona_state": self.effective_persona_state,
             "conflict_policy": self.conflict_policy,
             "conflict_policy_label": _conflict_policy_label(self.conflict_policy),
             "session_bundle_path": self.session_bundle_path,
@@ -138,6 +157,7 @@ class RuntimeSnapshot:
         paused_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.PAUSED)
         error_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.ERROR)
         blocked_count = sum(1 for status in self.accounts.values() if status.blocked_by_playing_session)
+        disabled_count = sum(1 for status in self.accounts.values() if not status.boost_enabled)
         active_slot_count = sum(len(status.active_app_ids) for status in self.accounts.values())
         return {
             "transport_name": self.transport_name,
@@ -152,6 +172,7 @@ class RuntimeSnapshot:
                 "paused_accounts": paused_count,
                 "error_accounts": error_count,
                 "blocked_accounts": blocked_count,
+                "disabled_accounts": disabled_count,
                 "active_slots": active_slot_count,
             },
             "statuses": statuses,
@@ -334,6 +355,7 @@ class _LiveWorkerConfig:
     account_name: str
     steam_id: str
     refresh_token: str
+    appear_online: bool
     persona_state: str
     conflict_policy: str
     custom_status: str
@@ -379,6 +401,7 @@ class _LiveBoostWorker:
         self._blocked_by_playing_session = False
         self._blocked_app_id = 0
         self._awaiting_unblock_reapply = False
+        self._yielded_to_new_session = False
         self._last_kick_attempt_at = 0.0
         self._last_error = ""
         self._updated_at = _iso_timestamp()
@@ -604,7 +627,11 @@ class _LiveBoostWorker:
             raise RuntimeError("Steam client session is not attached.")
 
         config, revision = self._clone_config(with_revision=True)
-        persona_state = getattr(EPersonaState, config.persona_state, None)
+        effective_persona_state = _effective_persona_state(
+            config.persona_state,
+            config.appear_online,
+        )
+        persona_state = getattr(EPersonaState, effective_persona_state, None)
         if persona_state is not None:
             client.change_status(persona_state=persona_state)
         client.games_played(list(config.app_ids))
@@ -630,6 +657,7 @@ class _LiveBoostWorker:
         with self._condition:
             self._applied_revision = revision
             self._awaiting_unblock_reapply = False
+            self._yielded_to_new_session = False
             self._condition.notify_all()
             return RuntimeStartResult(
                 active_app_ids=list(self._active_app_ids),
@@ -638,6 +666,10 @@ class _LiveBoostWorker:
 
     def _build_active_message(self, config: _LiveWorkerConfig, *, auth_source: str, mode: str) -> str:
         slot_count = len(config.app_ids)
+        effective_persona_state = _effective_persona_state(
+            config.persona_state,
+            config.appear_online,
+        )
         auth_label = {
             "refresh_token": "refresh token",
             "login_key": "login key",
@@ -656,7 +688,7 @@ class _LiveBoostWorker:
             slot_count,
             "" if slot_count == 1 else "s",
             auth_label,
-        )
+        ) + " Presence is %s." % effective_persona_state.lower()
 
     def _set_status(
         self,
@@ -744,6 +776,7 @@ class _LiveBoostWorker:
                 account_name=self._desired_config.account_name,
                 steam_id=self._desired_config.steam_id,
                 refresh_token=self._desired_config.refresh_token,
+                appear_online=self._desired_config.appear_online,
                 persona_state=self._desired_config.persona_state,
                 conflict_policy=self._desired_config.conflict_policy,
                 custom_status=self._desired_config.custom_status,
@@ -783,9 +816,9 @@ class _LiveBoostWorker:
             self._blocked_by_playing_session = blocked
             self._blocked_app_id = app_id if blocked else 0
             if blocked:
-                self._awaiting_unblock_reapply = True
+                self._awaiting_unblock_reapply = not self._yielded_to_new_session
             elif previously_blocked:
-                self._awaiting_unblock_reapply = True
+                self._awaiting_unblock_reapply = not self._yielded_to_new_session
                 self._last_kick_attempt_at = 0.0
             self._condition.notify_all()
 
@@ -821,6 +854,29 @@ class _LiveBoostWorker:
                 connected_at=self._connected_at,
                 conflict_policy=config.conflict_policy,
                 blocked_by_playing_session=True,
+                blocked_app_id=blocked_app_id,
+                last_error=last_error,
+            )
+            client.sleep(self._sleep_interval)
+            return True
+
+        if config.conflict_policy == CONFLICT_POLICY_YIELD:
+            last_error = ""
+            if not self._yielded_to_new_session:
+                try:
+                    client.games_played([])
+                except Exception as exc:
+                    last_error = str(exc).strip() or "Unable to clear the played-state lane."
+                self._yielded_to_new_session = True
+            self._set_status(
+                RuntimeState.IDLE,
+                "%s Yield policy stood this lane down for the newer Steam session. Start it again when you want to resume boosting." % message,
+                active_app_ids=[],
+                auth_source=self._auth_source or "refresh_token",
+                reconnect_attempts=self._reconnect_attempts,
+                connected_at=self._connected_at,
+                conflict_policy=config.conflict_policy,
+                blocked_by_playing_session=blocked,
                 blocked_app_id=blocked_app_id,
                 last_error=last_error,
             )
@@ -944,6 +1000,7 @@ class SteamNetworkBoosterRuntime:
             account_name=account.account_name,
             steam_id=steam_id,
             refresh_token=refresh_token,
+            appear_online=account.appear_online,
             persona_state=account.persona_state,
             conflict_policy=account.conflict_policy,
             custom_status=account.custom_status,
@@ -1026,6 +1083,14 @@ class RuntimeController:
             status.updated_at = _iso_timestamp()
             self._touch_snapshot()
             self._log_event("Unable to start %s because the saved session bundle is unavailable." % account.display_name)
+            return status
+
+        if not status.boost_enabled:
+            status.state = RuntimeState.IDLE
+            status.message = "Booster is disabled for this account."
+            status.updated_at = _iso_timestamp()
+            self._touch_snapshot()
+            self._log_event("Skipped starting %s because the booster is disabled." % account.display_name)
             return status
 
         if not status.configured_app_ids:
@@ -1158,6 +1223,9 @@ class RuntimeController:
             if status.state in (RuntimeState.STARTING, RuntimeState.BOOSTING, RuntimeState.PAUSED):
                 skipped += 1
                 continue
+            if not status.boost_enabled:
+                skipped += 1
+                continue
             if not status.session_ready or not status.configured_app_ids:
                 skipped += 1
                 continue
@@ -1201,7 +1269,13 @@ class RuntimeController:
 
         status.display_name = account.display_name
         status.login_mode = account.login_mode
+        status.boost_enabled = account.boost_enabled
+        status.appear_online = account.appear_online
         status.persona_state = account.persona_state
+        status.effective_persona_state = _effective_persona_state(
+            account.persona_state,
+            account.appear_online,
+        )
         status.conflict_policy = account.conflict_policy
         status.custom_status = account.custom_status
         status.session_bundle_path = str(account.session_bundle_path or "")
@@ -1238,6 +1312,10 @@ class RuntimeController:
         if not status.session_ready:
             status.state = RuntimeState.ERROR
             status.message = "Saved session bundle missing or incomplete."
+            return
+        if not status.boost_enabled:
+            status.state = RuntimeState.IDLE
+            status.message = "Booster is disabled for this account."
             return
         if not status.configured_app_ids:
             status.state = RuntimeState.IDLE
