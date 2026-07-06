@@ -582,6 +582,10 @@ class DesktopApi:
                 message="This account does not have a saved username for Steam client authorization.",
             )
 
+        self._append_activity(
+            "Starting Steam client authorization for %s."
+            % self._account_identity_label(account)
+        )
         try:
             self._authorize_client_session(
                 profile_id=account.profile_id,

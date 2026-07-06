@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -44,9 +45,11 @@ class SteamClientAuthGateway:
         *,
         session_store: Optional[SessionStore] = None,
         client_factory: Optional[Callable[[], ValvePythonSteamClient]] = None,
+        login_key_timeout_seconds: float = 10.0,
     ) -> None:
         self._session_store = session_store or SessionStore()
         self._client_factory = client_factory or ValvePythonSteamClient
+        self._login_key_timeout_seconds = max(1.0, float(login_key_timeout_seconds))
 
     def authorize_credentials(
         self,
@@ -105,9 +108,11 @@ class SteamClientAuthGateway:
                     "Steam client authorization failed: %s." % getattr(result, "name", result)
                 )
 
-            login_key = str(getattr(client, "login_key", "") or "").strip()
+            login_key = self._wait_for_login_key(client, timeout=self._login_key_timeout_seconds)
             if not login_key:
-                raise SteamClientAuthError("Steam client authorization succeeded, but no login key was returned.")
+                raise SteamClientAuthError(
+                    "Steam client authorization completed, but Steam did not issue a reusable login key. Try the booster sign-in again."
+                )
 
             cache_path = self._session_store.save_client_auth_cache(
                 profile_id,
@@ -159,3 +164,31 @@ class SteamClientAuthGateway:
             return client.login(account_name, password, auth_code=code)
 
         return client.login(account_name, password)
+
+    @staticmethod
+    def _wait_for_login_key(client, *, timeout: float) -> str:
+        login_key = str(getattr(client, "login_key", "") or "").strip()
+        if login_key:
+            return login_key
+
+        event_name = getattr(client, "EVENT_NEW_LOGIN_KEY", "")
+        if event_name and hasattr(client, "wait_event"):
+            try:
+                client.wait_event(event_name, timeout=timeout)
+            except Exception:
+                pass
+            login_key = str(getattr(client, "login_key", "") or "").strip()
+            if login_key:
+                return login_key
+
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while time.monotonic() < deadline:
+            login_key = str(getattr(client, "login_key", "") or "").strip()
+            if login_key:
+                return login_key
+            try:
+                client.sleep(0.25)
+            except Exception:
+                time.sleep(0.25)
+
+        return str(getattr(client, "login_key", "") or "").strip()

@@ -206,6 +206,31 @@ __INLINE_STYLES__
               </div>
 
               <div class="editor-shell editor-shell--hidden" id="account-editor-shell">
+                <div class="card card--embedded editor-client-auth-card editor-client-auth-card--hidden" id="editor-client-auth-card">
+                  <div class="card-header">
+                    <div>
+                      <div class="section-label">Authorization</div>
+                      <h3>Finish booster sign-in</h3>
+                      <p class="card-subtitle" id="editor-client-auth-copy">This account needs Steam client authorization before it can boost.</p>
+                    </div>
+                  </div>
+
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Password</span>
+                      <input id="editor-client-password" type="password" placeholder="Steam password">
+                    </label>
+                    <label class="field">
+                      <span id="editor-client-guard-label">Steam Guard Code</span>
+                      <input id="editor-client-guard-code" type="text" placeholder="Only required if Steam asks for it">
+                    </label>
+                  </div>
+
+                  <div class="form-actions">
+                    <button class="action-button" id="editor-client-authorize-button">Authorize Booster</button>
+                  </div>
+                </div>
+
                 <div class="toggle-grid">
                   <label class="toggle-card" for="editor-boost-enabled">
                     <span class="toggle-card__copy">
@@ -361,31 +386,6 @@ __INLINE_STYLES__
                 </div>
                 <div class="editor-message editor-message--muted" id="editor-library-message">
                   Library validation details will appear here.
-                </div>
-
-                <div class="card card--embedded editor-client-auth-card editor-client-auth-card--hidden" id="editor-client-auth-card">
-                  <div class="card-header">
-                    <div>
-                      <div class="section-label">Authorization</div>
-                      <h3>Finish booster sign-in</h3>
-                      <p class="card-subtitle" id="editor-client-auth-copy">This account needs Steam client authorization before it can boost.</p>
-                    </div>
-                  </div>
-
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Password</span>
-                      <input id="editor-client-password" type="password" placeholder="Steam password">
-                    </label>
-                    <label class="field">
-                      <span id="editor-client-guard-label">Steam Guard Code</span>
-                      <input id="editor-client-guard-code" type="text" placeholder="Only required if Steam asks for it">
-                    </label>
-                  </div>
-
-                  <div class="form-actions">
-                    <button class="action-button" id="editor-client-authorize-button">Authorize Booster</button>
-                  </div>
                 </div>
 
                 <div class="form-actions">
