@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import subprocess
+import traceback
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -81,6 +82,11 @@ POPULAR_GAMES = [
 
 SESSION_BUNDLE_VALIDATED_AT_KEY = "shb_session_validated_at"
 SESSION_BUNDLE_VALIDATION_INTERVAL_SECONDS = 6 * 60 * 60
+
+
+def _console_log_finish_booster(message: str) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] [finish-booster-login] {message}", flush=True)
 
 
 class DesktopApi:
@@ -582,12 +588,22 @@ class DesktopApi:
                 message="This account does not have a saved username for Steam client authorization.",
             )
 
+        _console_log_finish_booster(
+            "Bridge received Finish booster sign-in request for account=%s profile_id=%s steam_id=%s guard_kind=%s guard_supplied=%s"
+            % (
+                self._account_identity_label(account),
+                account.profile_id,
+                account.steam_id,
+                steam_guard_code_kind or "none",
+                "yes" if steam_guard_code else "no",
+            )
+        )
         self._append_activity(
             "Starting Steam client authorization for %s."
             % self._account_identity_label(account)
         )
         try:
-            self._authorize_client_session(
+            auth_result = self._authorize_client_session(
                 profile_id=account.profile_id,
                 account_name=account.account_name,
                 steam_id=account.steam_id,
@@ -596,18 +612,31 @@ class DesktopApi:
                 steam_guard_code_kind=steam_guard_code_kind,
             )
         except SteamClientGuardRequiredError as exc:
+            _console_log_finish_booster(
+                "Finish booster sign-in paused because Steam requested %s guard confirmation: %s"
+                % (exc.code_kind, str(exc).strip() or exc.__class__.__name__)
+            )
             self._append_activity(
                 "Steam client authorization needs a guard code for %s."
                 % self._account_identity_label(account)
             )
             return self._client_guard_required_result(exc)
         except Exception as exc:
+            _console_log_finish_booster(
+                "Finish booster sign-in failed with %s: %s"
+                % (exc.__class__.__name__, str(exc).strip() or "Unknown error.")
+            )
+            traceback.print_exc()
             self._append_activity(
                 "Steam client authorization failed for %s: %s"
                 % (self._account_identity_label(account), str(exc).strip() or "Unknown error.")
             )
             return self._error_result(exc)
 
+        _console_log_finish_booster(
+            "Finish booster sign-in completed successfully. login_key_cache=%s"
+            % getattr(auth_result, "cache_path", "unknown")
+        )
         self._append_activity(
             "Steam client authorization prepared for %s."
             % self._account_identity_label(account)
@@ -948,8 +977,8 @@ class DesktopApi:
         password: str,
         steam_guard_code: str = "",
         steam_guard_code_kind: str = "",
-    ) -> None:
-        self._client_auth_gateway.authorize_credentials(
+    ):
+        return self._client_auth_gateway.authorize_credentials(
             profile_id=profile_id,
             account_name=account_name,
             steam_id=steam_id,
@@ -1094,6 +1123,7 @@ class DesktopApi:
                 SteamResponseError,
                 SteamNetworkError,
                 SteamHTTPError,
+                SteamClientAuthError,
             ),
         ):
             return {
