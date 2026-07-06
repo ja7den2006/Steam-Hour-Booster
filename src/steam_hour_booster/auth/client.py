@@ -228,13 +228,7 @@ class SteamClientAuthGateway:
                 )
 
             _console_log(
-                "Submitting Steam client login with a guard code in default app-code mode because no guard kind was provided."
-            )
-            return self._submit_login_request(
-                client,
-                account_name=account_name,
-                password=password,
-                two_factor_code=code,
+                "A guard code was entered before Steam requested a specific guard type. Ignoring it on the first attempt and sending password-only login."
             )
 
         _console_log("Submitting Steam client login with username/password and no Steam Guard code.")

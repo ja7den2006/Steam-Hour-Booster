@@ -245,7 +245,7 @@ def test_client_auth_gateway_errors_when_login_key_never_arrives(tmp_path) -> No
         raise AssertionError("Expected SteamClientAuthError when login key never arrives.")
 
 
-def test_client_auth_gateway_does_not_retry_unknown_guard_code_as_email(tmp_path) -> None:
+def test_client_auth_gateway_ignores_unknown_guard_code_until_steam_requests_one(tmp_path) -> None:
     session_store = SessionStore(base_dir=tmp_path / "sessions")
     failing_client = FailingGuardCodeClient()
     gateway = SteamClientAuthGateway(
@@ -269,5 +269,5 @@ def test_client_auth_gateway_does_not_retry_unknown_guard_code_as_email(tmp_path
         raise AssertionError("Expected SteamClientAuthError for failing guard-code login.")
 
     assert len(failing_client.login_calls) == 1
-    assert failing_client.login_calls[0]["two_factor_code"] == "ABCDE"
+    assert failing_client.login_calls[0]["two_factor_code"] is None
     assert failing_client.login_calls[0]["auth_code"] is None
