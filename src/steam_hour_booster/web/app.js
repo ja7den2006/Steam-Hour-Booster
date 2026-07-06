@@ -775,7 +775,7 @@ function fillAccounts() {
         </div>
         <div>
           <span>Session</span>
-          <strong>${account.has_session_bundle ? 'Saved' : 'Missing'}</strong>
+          <strong>${escapeHtml(formatSessionStatus(account, runtimeStatus))}</strong>
         </div>
         <div>
           <span>Library</span>
@@ -911,7 +911,7 @@ function resetEditorDraftState(profileId = null) {
 
 function fillEditorHealth(profile, status) {
   setText('editor-runtime-state', status?.state_label || 'Idle');
-  setText('editor-session-status', profile?.has_session_bundle ? 'Saved' : 'Missing');
+  setText('editor-session-status', formatSessionStatus(profile, status));
   setText('editor-library-status', formatOwnedGamesValidationState(status?.owned_games_validation_state));
   setText('editor-runtime-message', status?.message || 'No booster message yet.');
   setText('editor-library-message', formatOwnedGamesValidationDetail(status));
@@ -1518,6 +1518,19 @@ function formatOwnedGamesValidationDetail(status) {
     ? ` Checked ${formatRuntimeTimestamp(status.owned_games_validation_checked_at)}.`
     : '';
   return `${message}${checkedAt}`;
+}
+
+function formatSessionStatus(account, runtimeStatus) {
+  if (!account?.has_session_bundle) {
+    return 'Missing';
+  }
+  if (runtimeStatus?.runtime_ready) {
+    return 'Ready';
+  }
+  if (runtimeStatus?.session_ready) {
+    return 'Saved (Web)';
+  }
+  return 'Saved';
 }
 
 function formatGameQueueSummary(enabledCount, totalCount) {

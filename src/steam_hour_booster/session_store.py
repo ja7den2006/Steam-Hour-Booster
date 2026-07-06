@@ -18,6 +18,12 @@ class SessionStore:
     def bundle_path(self, profile_id: str) -> Path:
         return self.base_dir / ("%s.json" % profile_id)
 
+    def client_credentials_dir(self, profile_id: str) -> Path:
+        return self.base_dir / "cm_credentials" / str(profile_id).strip()
+
+    def client_auth_cache_path(self, profile_id: str) -> Path:
+        return self.client_credentials_dir(profile_id) / "client_auth.json"
+
     def save_bundle(self, profile_id: str, bundle: Dict[str, object]) -> Path:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         path = self.bundle_path(profile_id)
@@ -60,6 +66,15 @@ class SessionStore:
             "has_access_token": bool(payload.get("access_token")),
             "has_session_id": bool(payload.get("session_id")),
         }
+
+    def load_client_auth_cache(self, profile_id: str) -> Dict[str, object]:
+        cache_path = self.client_auth_cache_path(profile_id)
+        if not cache_path.exists():
+            return {}
+        try:
+            return json.loads(cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
 
     @staticmethod
     def delete_bundle_path(path: str) -> None:

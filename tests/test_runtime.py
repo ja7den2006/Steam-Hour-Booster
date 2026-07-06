@@ -57,6 +57,14 @@ def build_client_refresh_token(steam_id: str) -> str:
     return "%s.%s.signature" % (header, payload)
 
 
+def build_web_refresh_token(steam_id: str) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode("utf-8")).decode("ascii").rstrip("=")
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"iss": "steam", "aud": ["web", "renew", "derive"], "sub": steam_id}).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return "%s.%s.signature" % (header, payload)
+
+
 def test_runtime_controller_marks_ready_accounts_from_saved_sessions(tmp_path) -> None:
     session_store = SessionStore(base_dir=tmp_path / "sessions")
     bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
@@ -154,6 +162,38 @@ def test_runtime_controller_flags_missing_sessions_and_empty_slots(tmp_path) -> 
     assert states["missing"] == "error"
     assert states["empty"] == "idle"
     assert snapshot["counts"]["error_accounts"] >= 1
+
+
+def test_live_runtime_marks_web_only_bundle_as_needing_auth_instead_of_error(tmp_path) -> None:
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {"steam_id": "7656119", "refresh_token": build_web_refresh_token("7656119")},
+    )
+    runtime = SteamNetworkBoosterRuntime(session_store=session_store)
+    controller = RuntimeController(
+        session_store=session_store,
+        transport=runtime,
+    )
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        account_name="primary_account",
+        steam_id="7656119",
+        session_bundle_path=str(bundle_path),
+        games=[IdleGame(app_id=730)],
+    )
+
+    snapshot = controller.refresh_accounts([account]).to_dict()
+    status = snapshot["statuses"][0]
+    started = controller.start_profile("steam_7656119", [account])
+
+    assert status["session_ready"] is True
+    assert status["runtime_ready"] is False
+    assert status["state"] == "needs_auth"
+    assert "authorization" in status["message"].lower()
+    assert snapshot["counts"]["needs_auth_accounts"] == 1
+    assert started.state == RuntimeState.NEEDS_AUTH
 
 
 def test_runtime_controller_keeps_disabled_accounts_idle(tmp_path) -> None:

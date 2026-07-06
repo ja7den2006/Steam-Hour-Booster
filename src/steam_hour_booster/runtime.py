@@ -75,6 +75,7 @@ def _owned_games_validation_label(state: str) -> str:
 
 class RuntimeState(str, Enum):
     IDLE = "idle"
+    NEEDS_AUTH = "needs_auth"
     READY = "ready"
     STARTING = "starting"
     BOOSTING = "boosting"
@@ -88,6 +89,8 @@ class AccountRuntimeStatus:
     display_name: str
     state: RuntimeState = RuntimeState.IDLE
     session_ready: bool = False
+    runtime_ready: bool = False
+    runtime_auth_message: str = ""
     login_mode: str = ""
     boost_enabled: bool = True
     appear_online: bool = True
@@ -131,6 +134,8 @@ class AccountRuntimeStatus:
             "state": self.state.value,
             "state_label": self.state.value.replace("_", " ").title(),
             "session_ready": self.session_ready,
+            "runtime_ready": self.runtime_ready,
+            "runtime_auth_message": self.runtime_auth_message,
             "login_mode": self.login_mode,
             "boost_enabled": self.boost_enabled,
             "appear_online": self.appear_online,
@@ -192,6 +197,7 @@ class RuntimeSnapshot:
             )
         ]
         ready_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.READY)
+        needs_auth_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.NEEDS_AUTH)
         boosting_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.BOOSTING)
         paused_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.PAUSED)
         error_count = sum(1 for status in self.accounts.values() if status.state == RuntimeState.ERROR)
@@ -217,6 +223,7 @@ class RuntimeSnapshot:
             "counts": {
                 "tracked_accounts": len(statuses),
                 "ready_accounts": ready_count,
+                "needs_auth_accounts": needs_auth_count,
                 "boosting_accounts": boosting_count,
                 "paused_accounts": paused_count,
                 "error_accounts": error_count,
@@ -1322,6 +1329,17 @@ class RuntimeController:
             self._log_event("Unable to start %s because owned-game validation failed." % account.display_name)
             return status
 
+        if not status.runtime_ready:
+            status.state = RuntimeState.NEEDS_AUTH
+            status.message = status.runtime_auth_message or "Steam client authorization is still required for boosting."
+            status.updated_at = _iso_timestamp()
+            self._touch_snapshot()
+            self._log_event(
+                "Skipped starting %s because Steam client authorization is not ready."
+                % account.display_name
+            )
+            return status
+
         session_bundle = self._load_session_bundle(account)
         status.state = RuntimeState.STARTING
         status.message = "Preparing boost lane."
@@ -1513,7 +1531,9 @@ class RuntimeController:
         status.auto_reply_timeout_seconds = max(30, int(account.auto_reply_timeout_seconds))
         status.session_bundle_path = str(account.session_bundle_path or "")
         status.configured_app_ids = [int(game.app_id) for game in account.games if game.enabled]
-        status.session_ready = self._has_valid_session_bundle(account)
+        status.session_ready = self._has_saved_session_bundle(account)
+        status.runtime_ready = self._has_runtime_auth(account)
+        status.runtime_auth_message = self._runtime_auth_message(account)
         self._apply_owned_games_validation(
             status,
             self._owned_games_validator.validate_account(account),
@@ -1577,6 +1597,10 @@ class RuntimeController:
             status.state = RuntimeState.IDLE
             status.message = "No game slots configured."
             return
+        if not status.runtime_ready:
+            status.state = RuntimeState.NEEDS_AUTH
+            status.message = status.runtime_auth_message or "Steam client authorization is still required for boosting."
+            return
         if status.owned_games_validation_state == "invalid":
             status.state = RuntimeState.ERROR
             status.last_error = status.owned_games_validation_message
@@ -1608,7 +1632,7 @@ class RuntimeController:
         status.owned_games_missing_app_ids = list(validation.missing_app_ids)
         status.owned_games_matched_titles = dict(validation.matched_titles)
 
-    def _has_valid_session_bundle(self, account: AccountProfile) -> bool:
+    def _has_saved_session_bundle(self, account: AccountProfile) -> bool:
         bundle = self._load_session_bundle(account)
         if not bundle:
             return False
@@ -1617,11 +1641,57 @@ class RuntimeController:
         if not steam_id:
             return False
 
+        return True
+
+    def _has_runtime_auth(self, account: AccountProfile) -> bool:
+        bundle = self._load_session_bundle(account)
+        if not bundle:
+            return False
+
         if self._transport.preview_mode:
             return True
 
         refresh_token = str(bundle.get("refresh_token", "") or "").strip()
-        return bool(refresh_token and _refresh_token_is_client_usable(refresh_token))
+        if refresh_token and _refresh_token_is_client_usable(refresh_token):
+            return True
+
+        return self._has_cached_login_key(account)
+
+    def _runtime_auth_message(self, account: AccountProfile) -> str:
+        if self._transport.preview_mode:
+            return ""
+
+        bundle = self._load_session_bundle(account)
+        if not bundle:
+            return "Saved session bundle missing or incomplete."
+
+        if self._has_cached_login_key(account):
+            return "Saved Steam client login key is ready."
+
+        refresh_token = str(bundle.get("refresh_token", "") or "").strip()
+        if refresh_token and _refresh_token_is_client_usable(refresh_token):
+            return "Saved Steam client refresh token is ready."
+
+        if refresh_token:
+            return (
+                "Saved web session is ready, but Steam client authorization is still required before this account can boost."
+            )
+
+        return "Saved session bundle is missing a Steam client authorization path."
+
+    def _has_cached_login_key(self, account: AccountProfile) -> bool:
+        cache = self._session_store.load_client_auth_cache(account.profile_id)
+        login_key = str(cache.get("login_key", "") or "").strip()
+        if not login_key:
+            return False
+
+        cached_account_name = str(cache.get("account_name", "") or "").strip()
+        cached_steam_id = str(cache.get("steam_id", "") or "").strip()
+        if account.account_name and cached_account_name and cached_account_name != account.account_name:
+            return False
+        if account.steam_id and cached_steam_id and cached_steam_id != account.steam_id:
+            return False
+        return True
 
     def _load_session_bundle(self, account: AccountProfile) -> Optional[Dict[str, object]]:
         if not account.session_bundle_path:
