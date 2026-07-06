@@ -73,6 +73,19 @@ If you already installed dependencies and only want to relaunch the shell:
 .\run_dev.ps1 -SkipInstall
 ```
 
+If PowerShell script execution is blocked on your machine, use the policy-safe batch launcher instead:
+
+```bat
+run_dev.cmd
+run_dev.cmd -SkipInstall
+```
+
+Or run PowerShell once with a process-local bypass:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run_dev.ps1 -SkipInstall
+```
+
 Run tests:
 
 ```bash
