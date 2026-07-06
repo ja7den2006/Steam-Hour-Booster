@@ -12,239 +12,167 @@ __INLINE_STYLES__
     <div class="app-shell">
       <header class="topbar">
         <div class="topbar__drag pywebview-drag-region" id="drag-region">
-          <div class="brand-badge">SHB</div>
-          <div class="brand-copy">
-            <div class="brand-copy__title">Steam Hour Booster</div>
-            <div class="brand-copy__subtitle">Desktop control surface</div>
+          <div class="steam-mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64" role="img" aria-label="Steam">
+              <circle cx="32" cy="32" r="30" fill="#111821"></circle>
+              <circle cx="43" cy="21" r="10" fill="none" stroke="#ffffff" stroke-width="5"></circle>
+              <circle cx="43" cy="21" r="4" fill="#ffffff"></circle>
+              <path d="M17 41.5 28.5 46a8 8 0 1 0 4.7-10.7L22.5 31" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
+              <circle cx="27" cy="44.5" r="3.4" fill="#ffffff"></circle>
+            </svg>
           </div>
-          <div class="topbar-pill" id="topbar-pill">Runtime controller online</div>
+          <div class="topbar__title">Steam Hour Booster</div>
         </div>
+
+        <nav class="topbar__nav">
+          <button class="nav-button is-active" data-page="overview">Overview</button>
+          <button class="nav-button" data-page="accounts">Accounts</button>
+        </nav>
+
         <div class="topbar__actions">
           <button class="window-button" data-action="minimize">_</button>
-          <button class="window-button" data-action="maximize" id="maximize-button">[]</button>
+          <button class="window-button" data-action="maximize" id="maximize-button">[ ]</button>
           <button class="window-button window-button--close" data-action="close">X</button>
         </div>
       </header>
 
-      <div class="workspace">
-        <aside class="sidebar">
-          <div class="sidebar__intro">
-            <div class="sidebar__eyebrow">CONTROL SURFACE</div>
-            <h1>Professional shell first.</h1>
-            <p>
-              The product now has a branded desktop shell, account onboarding,
-              runtime profile editing, and a session-backed runtime controller
-              instead of a throwaway script UI.
-            </p>
-          </div>
-
-          <nav class="nav">
-            <button class="nav-button is-active" data-page="dashboard">
-              <span>Overview</span>
-              <small>Architecture, delivery, and posture</small>
-            </button>
-            <button class="nav-button" data-page="accounts">
-              <span>Accounts</span>
-              <small>Profile and auth onboarding</small>
-            </button>
-            <button class="nav-button" data-page="runtime">
-              <span>Runtime</span>
-              <small>Boost lanes and operational flow</small>
-            </button>
-            <button class="nav-button" data-page="settings">
-              <span>Settings</span>
-              <small>Local state and shell wiring</small>
-            </button>
-          </nav>
-
-          <section class="sidebar-card">
-            <div class="sidebar-card__title">Patch status</div>
-            <p>
-              Each patch is meant to leave the repo in a better operational
-              state. The current build already covers the real host shell,
-              auth boundary, account management, and runtime control surface.
-            </p>
-          </section>
-        </aside>
-
-        <main class="content">
-          <section class="page is-active" data-page="dashboard">
-            <section class="hero card reveal">
-              <div class="hero__copy">
-                <div class="eyebrow">CURRENT PRODUCT SLICE</div>
-                <h2>A custom desktop shell with real account onboarding and runtime control.</h2>
-                <p>
-                  This build path is centered on durable account handling,
-                  professional presentation, durable session handling, and a
-                  runtime surface that is ready for the live multi-slot Steam
-                  client transport.
-                </p>
-                <div class="hero__pills">
-                  <span class="pill">Credential login</span>
-                  <span class="pill">QR approval</span>
-                  <span class="pill">Steam Guard</span>
-                  <span class="pill pill--subtle">32-slot target</span>
+      <main class="content">
+        <section class="page is-active" data-page="overview">
+          <div class="page-stack">
+            <section class="card summary-card">
+              <div class="summary-card__header">
+                <div>
+                  <h1>Booster Overview</h1>
+                  <p>Live booster state and recent activity.</p>
+                </div>
+                <div class="summary-card__actions">
+                  <button class="action-button" id="overview-start-all-button">Start All</button>
+                  <button class="secondary-button" id="overview-stop-all-button">Stop All</button>
+                  <button class="ghost-button" id="overview-refresh-button">Refresh</button>
+                  <button class="ghost-button" id="overview-open-log-button">Open Log</button>
                 </div>
               </div>
 
-              <div class="hero__meta card card--embedded">
-                <h3>Build posture</h3>
-                <div class="meta-list">
-                  <div><span>Desktop stack</span><strong id="build-desktop-stack">Loading</strong></div>
-                  <div><span>Auth reference</span><strong id="build-auth-reference">Loading</strong></div>
-                  <div><span>Repository flow</span><strong id="build-repo-flow">Loading</strong></div>
-                  <div><span>Default branch</span><strong id="build-default-branch">Loading</strong></div>
-                  <div><span>Configured accounts</span><strong id="build-account-count">0</strong></div>
+              <div class="status-banner status-banner--hidden" id="runtime-status"></div>
+
+              <div class="summary-strip">
+                <div class="summary-tile">
+                  <span>Accounts</span>
+                  <strong id="overview-account-count">0</strong>
+                </div>
+                <div class="summary-tile">
+                  <span>Boosting</span>
+                  <strong id="overview-active-count">0</strong>
+                </div>
+                <div class="summary-tile">
+                  <span>Ready</span>
+                  <strong id="overview-ready-count">0</strong>
+                </div>
+                <div class="summary-tile">
+                  <span>Active Slots</span>
+                  <strong id="overview-slot-count">0</strong>
                 </div>
               </div>
             </section>
 
-            <section class="stats-grid reveal reveal--delay-1">
-              <article class="card stat-card">
-                <span class="stat-card__label">Concurrent slots</span>
-                <strong class="stat-card__value">32</strong>
-                <p>Runtime work is being shaped around Steam's supported multi-app played state ceiling per account.</p>
-              </article>
-              <article class="card stat-card">
-                <span class="stat-card__label">Auth modes</span>
-                <strong class="stat-card__value">4</strong>
-                <p>Credentials, Steam Guard email or app code, refresh tokens, and QR approval are all supported in the onboarding flow.</p>
-              </article>
-              <article class="card stat-card">
-                <span class="stat-card__label">Configured slots</span>
-                <strong class="stat-card__value" id="configured-slot-count">0</strong>
-                <p>The shell now tracks per-account game targets in config and uses them in the runtime controller.</p>
-              </article>
-            </section>
-
-            <section class="three-up reveal reveal--delay-2">
-              <article class="card">
-                <h3>Authentication boundary</h3>
-                <p>UI code does not talk to raw Steam responses. The gateway wraps login, QR polling, refresh-token reuse, and session export.</p>
-                <div class="meta-list">
-                  <div><span>Credential login</span><strong>Wrapped</strong></div>
-                  <div><span>Refresh-token reuse</span><strong>Wrapped</strong></div>
-                  <div><span>QR session challenge</span><strong>Wrapped</strong></div>
-                  <div><span>Bundle export</span><strong>Wrapped</strong></div>
-                </div>
-              </article>
-              <article class="card">
-                <h3>Runtime path</h3>
-                <p>The boost engine now runs behind explicit runtime contracts with persistent diagnostics and live lane telemetry.</p>
-                <div class="meta-list">
-                  <div><span>Current state</span><strong>Controller + live client transport</strong></div>
-                  <div><span>Conflict handling</span><strong>Pause or force-kick</strong></div>
-                  <div><span>Diagnostics</span><strong>Persistent runtime event log</strong></div>
-                  <div><span>Reconnect posture</span><strong>Backoff + resume</strong></div>
-                </div>
-              </article>
-              <article class="card">
-                <h3>Local state</h3>
-                <p>Safe config, session bundles, and logs are already mapped to dedicated local folders.</p>
-                <div class="meta-list">
-                  <div><span>Config</span><strong id="path-config">Loading</strong></div>
-                  <div><span>Sessions</span><strong id="path-sessions">Loading</strong></div>
-                  <div><span>Logs</span><strong id="path-logs">Loading</strong></div>
-                </div>
-              </article>
-            </section>
-          </section>
-
-          <section class="page" data-page="accounts">
-            <section class="two-up">
+            <section class="overview-grid">
               <article class="card">
                 <div class="card-header">
                   <div>
-                    <div class="eyebrow">ACCOUNTS</div>
-                    <h3>Account profiles</h3>
+                    <div class="section-label">Accounts</div>
+                    <h2>Booster control</h2>
                   </div>
-                  <span class="pill pill--subtle" id="accounts-count-pill">0 configured</span>
                 </div>
-                <p class="card-copy">
-                  Signed-in accounts appear here with their session persistence status, login method, game-slot targets, and conflict posture.
-                </p>
+                <div class="runtime-account-list" id="runtime-account-list"></div>
+              </article>
+
+              <article class="card card--log">
+                <div class="card-header">
+                  <div>
+                    <div class="section-label">Console</div>
+                    <h2>Activity</h2>
+                  </div>
+                </div>
+                <pre id="runtime-log">[ui] Waiting for activity...</pre>
+              </article>
+            </section>
+
+            <div class="footer-note">Powered by SteamCommunityKit</div>
+          </div>
+        </section>
+
+        <section class="page" data-page="accounts">
+          <div class="page-stack">
+            <section class="accounts-grid">
+              <article class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="section-label">Accounts</div>
+                    <h2>Saved accounts</h2>
+                  </div>
+                  <span class="pill pill--subtle" id="accounts-count-pill">0 saved</span>
+                </div>
                 <div class="account-list" id="account-list"></div>
               </article>
 
               <article class="card auth-card">
                 <div class="card-header">
                   <div>
-                    <div class="eyebrow">AUTHENTICATION STUDIO</div>
-                    <h3>Onboard an account</h3>
+                    <div class="section-label">Sign In</div>
+                    <h2>Add an account</h2>
                   </div>
-                  <span class="pill pill--subtle" id="auth-host-pill">SteamCommunityKit</span>
                 </div>
-                <p class="card-copy">
-                  Community session bundles are stored outside the main config payload. Passwords are only used for the live sign-in request and are not written into config.
-                </p>
 
                 <div class="mode-switch">
-                  <button class="mode-pill is-active" data-auth-mode="credentials">Credentials</button>
-                  <button class="mode-pill" data-auth-mode="refresh-token">Refresh Token</button>
-                  <button class="mode-pill" data-auth-mode="qr">QR Login</button>
+                  <button class="mode-pill is-active" data-auth-mode="credentials">Username / Password</button>
+                  <button class="mode-pill" data-auth-mode="qr">QR Code</button>
                 </div>
 
                 <div class="status-banner status-banner--hidden" id="auth-status"></div>
 
                 <div class="auth-panel is-active" data-auth-panel="credentials">
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Display Name</span>
-                      <input id="cred-display-name" type="text" placeholder="Primary account">
-                    </label>
-                    <label class="field">
-                      <span>Account Name</span>
-                      <input id="cred-account-name" type="text" placeholder="steam_account_name">
-                    </label>
-                  </div>
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Password</span>
-                      <input id="cred-password" type="password" placeholder="Steam password">
-                    </label>
-                    <label class="field">
-                      <span id="cred-guard-code-label">Steam Guard Code</span>
-                      <input id="cred-guard-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Email or app code if required">
-                    </label>
-                  </div>
-                  <div class="form-actions">
-                    <button class="action-button" id="credentials-submit-button">Sign In With Credentials</button>
-                    <p class="helper-copy" id="cred-guard-helper">If Steam Guard is required, enter the code here and submit again.</p>
-                  </div>
-                </div>
+                  <div class="auth-stage is-active" data-auth-stage="credentials">
+                    <div class="form-grid">
+                      <label class="field">
+                        <span>Username</span>
+                        <input id="cred-account-name" type="text" placeholder="steam_account_name">
+                      </label>
+                      <label class="field">
+                        <span>Password</span>
+                        <input id="cred-password" type="password" placeholder="Steam password">
+                      </label>
+                    </div>
 
-                <div class="auth-panel" data-auth-panel="refresh-token">
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Display Name</span>
-                      <input id="refresh-display-name" type="text" placeholder="Recovered session">
-                    </label>
-                    <label class="field field--wide">
-                      <span>Refresh Token</span>
-                      <textarea id="refresh-token" rows="5" placeholder="Paste a Steam refresh token"></textarea>
-                    </label>
+                    <div class="form-actions">
+                      <button class="action-button" id="credentials-submit-button">Sign In</button>
+                    </div>
                   </div>
-                  <div class="form-actions">
-                    <button class="action-button" id="refresh-submit-button">Attach From Refresh Token</button>
-                    <p class="helper-copy">Use this when you already have a valid Steam community refresh token and want to seed a session bundle directly.</p>
+
+                  <div class="auth-stage" data-auth-stage="guard">
+                    <div class="guard-panel">
+                      <div class="guard-panel__copy">
+                        <div class="section-label">Steam Guard</div>
+                        <h3 id="guard-code-label">Steam Guard Code</h3>
+                        <p id="guard-status-copy">Enter the code from Steam to finish sign-in.</p>
+                      </div>
+
+                      <label class="field">
+                        <span>Code</span>
+                        <input id="guard-code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter code">
+                      </label>
+
+                      <div class="form-actions">
+                        <button class="action-button" id="guard-submit-button">Submit Code</button>
+                        <button class="ghost-button" id="guard-back-button">Back</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 <div class="auth-panel" data-auth-panel="qr">
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Display Name</span>
-                      <input id="qr-display-name" type="text" placeholder="Mobile-approved account">
-                    </label>
-                    <label class="field">
-                      <span>Device Friendly Name</span>
-                      <input id="qr-device-name" type="text" placeholder="Steam Hour Booster Desktop">
-                    </label>
-                  </div>
                   <div class="form-actions">
                     <button class="action-button" id="qr-start-button">Start QR Login</button>
-                    <button class="secondary-button" id="qr-cancel-button" disabled>Cancel QR Session</button>
-                    <p class="helper-copy">Start the QR challenge here, approve it in the Steam mobile app, and let this screen poll until the session bundle is saved.</p>
+                    <button class="secondary-button" id="qr-cancel-button" disabled>Cancel</button>
                   </div>
 
                   <div class="qr-panel qr-panel--hidden" id="qr-panel">
@@ -252,183 +180,151 @@ __INLINE_STYLES__
                       <img id="qr-image" alt="Steam QR login challenge">
                     </div>
                     <div class="qr-panel__copy">
-                      <div class="eyebrow">QR CHALLENGE</div>
-                      <h4 id="qr-title">Waiting for mobile approval</h4>
-                      <p id="qr-status-copy">
-                        Approve the pending Steam sign-in request from your phone.
-                      </p>
-                      <label class="field field--wide">
+                      <div class="section-label">QR</div>
+                      <h3 id="qr-title">Waiting for approval</h3>
+                      <p id="qr-status-copy">Approve the Steam sign-in on your phone.</p>
+                      <label class="field">
                         <span>Challenge URL</span>
                         <input id="qr-challenge-url" type="text" readonly>
                       </label>
                     </div>
                   </div>
                 </div>
+
               </article>
             </section>
 
-            <section class="two-up">
-              <article class="card">
-                <div class="eyebrow">SESSION-FIRST DESIGN</div>
-                <h3>Persistence posture</h3>
-                <div class="meta-list">
-                  <div><span>Supported login modes</span><strong>Credentials, QR, refresh token</strong></div>
-                  <div><span>Steam Guard</span><strong>Email and app</strong></div>
-                  <div><span>Secret storage</span><strong>Outside main config</strong></div>
-                  <div><span>Per-account slots</span><strong>0 to 32 app IDs</strong></div>
-                  <div><span>Session reuse target</span><strong>Bundle-backed startup</strong></div>
+            <section class="card editor-card" id="editor-card">
+              <div class="card-header">
+                <div>
+                  <div class="section-label">Profile Editor</div>
+                  <h2 id="account-editor-title">Select an account</h2>
                 </div>
-              </article>
+                <span class="pill pill--subtle" id="account-editor-slot-pill">0 games</span>
+              </div>
 
-              <article class="card">
-                <div class="eyebrow">OPERATIONAL COVERAGE</div>
-                <h3>What the current build already handles</h3>
-                <ul class="plain-list">
-                  <li>Real account onboarding through the desktop shell.</li>
-                  <li>Per-account session bundle persistence under local app data.</li>
-                  <li>QR login approval flow without terminal prompts.</li>
-                  <li>A live Steam client runtime with conflict handling and persistent event logging.</li>
-                </ul>
-              </article>
-            </section>
+              <div class="status-banner status-banner--hidden" id="account-editor-status"></div>
 
-            <section class="editor-grid">
-              <article class="card editor-card">
-                <div class="card-header">
-                  <div>
-                    <div class="eyebrow">PROFILE EDITOR</div>
-                    <h3 id="account-editor-title">Runtime-ready account settings</h3>
-                  </div>
-                  <span class="pill pill--subtle" id="account-editor-slot-pill">0 active</span>
-                </div>
-                <p class="card-copy">
-                  Configure the parts of each account that matter once the live runtime is attached: boost availability, visible presence, session priority, slot list, and operator notes.
-                </p>
+              <div class="editor-empty" id="account-editor-empty">
+                Select an account to edit its booster settings.
+              </div>
 
-                <div class="status-banner status-banner--hidden" id="account-editor-status"></div>
+              <div class="editor-shell editor-shell--hidden" id="account-editor-shell">
+                <div class="toggle-grid">
+                  <label class="toggle-card" for="editor-boost-enabled">
+                    <span class="toggle-card__copy">
+                      <strong>Booster enabled</strong>
+                      <small>Let this account start from the app.</small>
+                    </span>
+                    <span class="toggle-card__control">
+                      <input id="editor-boost-enabled" type="checkbox">
+                      <span class="toggle-card__indicator"></span>
+                    </span>
+                  </label>
 
-                <div class="editor-empty" id="account-editor-empty">
-                  Select a saved account to edit its runtime-facing profile details.
+                  <label class="toggle-card" for="editor-appear-online">
+                    <span class="toggle-card__copy">
+                      <strong>Appear online</strong>
+                      <small>Turn this off to stay invisible while boosting.</small>
+                    </span>
+                    <span class="toggle-card__control">
+                      <input id="editor-appear-online" type="checkbox">
+                      <span class="toggle-card__indicator"></span>
+                    </span>
+                  </label>
                 </div>
 
-                <div class="editor-shell editor-shell--hidden" id="account-editor-shell">
-                  <div class="toggle-grid">
-                    <label class="toggle-card" for="editor-boost-enabled">
-                      <span class="toggle-card__copy">
-                        <strong>Booster Enabled</strong>
-                        <small>Allow this account to participate in runtime start sweeps and manual starts.</small>
-                      </span>
-                      <span class="toggle-card__control">
-                        <input id="editor-boost-enabled" type="checkbox">
-                        <span class="toggle-card__indicator"></span>
-                      </span>
-                    </label>
+                <div class="form-grid">
+                  <label class="field">
+                    <span>Label</span>
+                    <input id="editor-display-name" type="text" placeholder="Account label">
+                  </label>
+                  <label class="field">
+                    <span>Status while online</span>
+                    <select id="editor-persona-state"></select>
+                  </label>
+                </div>
 
-                    <label class="toggle-card" for="editor-appear-online">
-                      <span class="toggle-card__copy">
-                        <strong>Appear Online While Boosting</strong>
-                        <small>Turn this off to force the account into an invisible/offline posture while the lane is active.</small>
-                      </span>
-                      <span class="toggle-card__control">
-                        <input id="editor-appear-online" type="checkbox">
-                        <span class="toggle-card__indicator"></span>
-                      </span>
-                    </label>
+                <div class="form-grid">
+                  <label class="field">
+                    <span>Username</span>
+                    <input id="editor-account-name" type="text" readonly>
+                  </label>
+                  <label class="field">
+                    <span>Steam ID</span>
+                    <input id="editor-steam-id" type="text" readonly>
+                  </label>
+                </div>
+
+                <div class="form-grid">
+                  <label class="field">
+                    <span>Login</span>
+                    <input id="editor-login-mode" type="text" readonly>
+                  </label>
+                  <label class="field">
+                    <span>When another session starts</span>
+                    <select id="editor-conflict-policy"></select>
+                  </label>
+                </div>
+
+                <div class="card card--embedded">
+                  <div class="card-header">
+                    <div>
+                      <div class="section-label">Auto Reply</div>
+                      <h3>Incoming messages</h3>
+                    </div>
                   </div>
 
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Display Name</span>
-                      <input id="editor-display-name" type="text" placeholder="Primary account">
-                    </label>
-                    <label class="field">
-                      <span>Visible Presence</span>
-                      <select id="editor-persona-state"></select>
-                    </label>
-                  </div>
+                  <label class="toggle-card" for="editor-auto-reply-enabled">
+                    <span class="toggle-card__copy">
+                      <strong>Reply automatically</strong>
+                      <small>Send one message back while the booster is running.</small>
+                    </span>
+                    <span class="toggle-card__control">
+                      <input id="editor-auto-reply-enabled" type="checkbox">
+                      <span class="toggle-card__indicator"></span>
+                    </span>
+                  </label>
 
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Account Name</span>
-                      <input id="editor-account-name" type="text" readonly>
-                    </label>
-                    <label class="field">
-                      <span>Steam ID</span>
-                      <input id="editor-steam-id" type="text" readonly>
-                    </label>
-                  </div>
+                  <div class="editor-auto-reply-fields" id="editor-auto-reply-fields">
+                    <div class="form-grid">
+                      <label class="field field--wide">
+                        <span>Message</span>
+                        <textarea id="editor-auto-reply-message" rows="4" placeholder="I am hour boosting right now. Please reply later."></textarea>
+                      </label>
+                    </div>
 
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Login Mode</span>
-                      <input id="editor-login-mode" type="text" readonly>
-                    </label>
-                    <label class="field">
-                      <span>Session Priority Policy</span>
-                      <select id="editor-conflict-policy"></select>
-                    </label>
+                    <div class="form-grid">
+                      <label class="field">
+                        <span>Cooldown (seconds)</span>
+                        <input id="editor-auto-reply-cooldown" type="number" min="15" max="86400" step="1" placeholder="180">
+                      </label>
+                      <label class="field">
+                        <span>Timeout (seconds)</span>
+                        <input id="editor-auto-reply-timeout" type="number" min="30" max="86400" step="1" placeholder="1800">
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card card--embedded">
+                  <div class="card-header">
+                    <div>
+                      <div class="section-label">Games</div>
+                      <h3>Boost queue</h3>
+                    </div>
+                    <span class="pill pill--subtle" id="editor-games-count-pill">0 games</span>
                   </div>
 
                   <div class="form-grid">
                     <label class="field field--wide">
-                      <span>Custom Status</span>
-                      <input id="editor-custom-status" type="text" placeholder="Optional custom non-Steam status">
-                    </label>
-                  </div>
-                  <p class="helper-copy">This stays as an operator-facing local status label. It is not sent to Steam as persona text by the current transport.</p>
-
-                  <div class="game-slot-panel card card--embedded">
-                    <div class="card-header">
-                      <div>
-                        <div class="eyebrow">AUTO-REPLY</div>
-                        <h3>Incoming message safeguards</h3>
-                      </div>
-                    </div>
-
-                    <label class="toggle-card" for="editor-auto-reply-enabled">
-                      <span class="toggle-card__copy">
-                        <strong>Reply To Incoming Messages</strong>
-                        <small>Automatically answer friend chat messages while this boost lane is active.</small>
-                      </span>
-                      <span class="toggle-card__control">
-                        <input id="editor-auto-reply-enabled" type="checkbox">
-                        <span class="toggle-card__indicator"></span>
-                      </span>
-                    </label>
-
-                    <div class="editor-auto-reply-fields" id="editor-auto-reply-fields">
-                      <div class="form-grid">
-                        <label class="field field--wide">
-                          <span>Auto-Reply Message</span>
-                          <textarea id="editor-auto-reply-message" rows="4" placeholder="I am hour boosting right now. Please reply later."></textarea>
-                        </label>
-                      </div>
-
-                      <div class="form-grid">
-                        <label class="field">
-                          <span>Cooldown Seconds</span>
-                          <input id="editor-auto-reply-cooldown" type="number" min="15" max="86400" step="1" placeholder="180">
-                        </label>
-                        <label class="field">
-                          <span>Session Timeout Seconds</span>
-                          <input id="editor-auto-reply-timeout" type="number" min="30" max="86400" step="1" placeholder="1800">
-                        </label>
-                      </div>
-
-                      <p class="helper-copy">Cooldown limits repeated replies to the same friend. Timeout stops a long-running message burst until the chat goes quiet and resets.</p>
-                    </div>
-                  </div>
-
-                  <div class="form-grid">
-                    <label class="field field--wide">
-                      <span>Popular Preset</span>
+                      <span>Popular preset</span>
                       <select id="editor-preset-game"></select>
                     </label>
                   </div>
 
                   <div class="form-actions">
-                    <button class="secondary-button" id="editor-add-preset-button">Add Preset Slot</button>
-                    <p class="helper-copy">Preset entries cover common games fast, while custom entries let you add any Steam app id.</p>
+                    <button class="secondary-button" id="editor-add-preset-button">Add preset</button>
                   </div>
 
                   <div class="form-grid">
@@ -437,249 +333,55 @@ __INLINE_STYLES__
                       <input id="editor-custom-app-id" type="text" inputmode="numeric" placeholder="730">
                     </label>
                     <label class="field">
-                      <span>Display Label</span>
+                      <span>Game name</span>
                       <input id="editor-custom-game-title" type="text" placeholder="Counter-Strike 2">
                     </label>
                   </div>
 
                   <div class="form-actions">
-                    <button class="action-button" id="editor-add-custom-game-button">Add Custom Slot</button>
-                    <p class="helper-copy">Each account can queue up to 32 stored slots. Slots can be reordered or temporarily disabled without being removed.</p>
+                    <button class="action-button" id="editor-add-custom-game-button">Add game</button>
                   </div>
 
-                  <div class="game-slot-panel card card--embedded">
-                    <div class="card-header">
-                      <div>
-                        <div class="eyebrow">GAME SLOT LIST</div>
-                        <h3>Current boost queue</h3>
-                      </div>
-                      <span class="pill pill--subtle" id="editor-games-count-pill">0 active</span>
-                    </div>
-                    <div class="game-slot-empty" id="editor-games-empty">
-                      No game slots added yet. Use a preset or add a custom app id.
-                    </div>
-                    <div class="game-slot-list" id="editor-games-list"></div>
+                  <div class="game-slot-empty" id="editor-games-empty">
+                    No games added yet.
                   </div>
-
+                  <div class="game-slot-list" id="editor-games-list"></div>
                   <textarea id="editor-games-text" hidden></textarea>
+                </div>
 
-                  <div class="form-grid">
-                    <label class="field field--wide">
-                      <span>Operator Notes</span>
-                      <textarea id="editor-notes" rows="5" placeholder="Per-account notes, constraints, or reminders"></textarea>
-                    </label>
+                <div class="editor-health">
+                  <div class="editor-health__item">
+                    <span>Booster state</span>
+                    <strong id="editor-runtime-state">Idle</strong>
                   </div>
-
-                  <div class="editor-session card card--embedded">
-                    <div class="card-header">
-                      <div>
-                        <div class="eyebrow">SESSION BUNDLE</div>
-                        <h3>Saved bundle metadata</h3>
-                      </div>
-                      <button class="ghost-button" id="editor-open-session-button">Open Bundle</button>
-                    </div>
-                    <div class="meta-list">
-                      <div><span>Bundle file</span><strong id="editor-session-path">Loading</strong></div>
-                      <div><span>Modified</span><strong id="editor-session-modified">Loading</strong></div>
-                      <div><span>Refresh token</span><strong id="editor-session-refresh">Loading</strong></div>
-                      <div><span>Access token</span><strong id="editor-session-access">Loading</strong></div>
-                      <div><span>Session ID</span><strong id="editor-session-id">Loading</strong></div>
-                    </div>
+                  <div class="editor-health__item">
+                    <span>Session</span>
+                    <strong id="editor-session-status">Missing</strong>
                   </div>
-
-                  <div class="editor-library card card--embedded">
-                    <div class="card-header">
-                      <div>
-                        <div class="eyebrow">OWNED-GAME VALIDATION</div>
-                        <h3>Library integrity check</h3>
-                      </div>
-                      <span class="runtime-state runtime-state--idle" id="editor-library-status">Pending</span>
-                    </div>
-                    <div class="meta-list">
-                      <div><span>Last check</span><strong id="editor-library-checked-at">Not checked yet</strong></div>
-                      <div><span>Web API key</span><strong id="editor-library-api-key">Unknown</strong></div>
-                      <div><span>Missing app IDs</span><strong id="editor-library-missing">None</strong></div>
-                    </div>
-                    <p class="card-copy" id="editor-library-message">
-                      The runtime controller will validate configured app IDs against the owned-games API when enough community web credentials are available.
-                    </p>
-                  </div>
-
-                  <div class="form-actions">
-                    <button class="action-button" id="account-save-button">Save Account Settings</button>
-                    <p class="helper-copy">Visible presence applies only when online boosting is enabled. Turning that off forces the runtime to stay invisible.</p>
+                  <div class="editor-health__item">
+                    <span>Library</span>
+                    <strong id="editor-library-status">Pending</strong>
                   </div>
                 </div>
-              </article>
-            </section>
-          </section>
 
-          <section class="page" data-page="runtime">
-            <section class="two-up">
-              <article class="card">
-                <div class="eyebrow">RUNTIME LANES</div>
-                <h3>Operational flow</h3>
-                <div class="lane-list">
-                  <div class="lane-row"><strong>Community auth</strong><span>Acquire or restore session state.</span></div>
-                  <div class="lane-row"><strong>Client login</strong><span>Establish Steam client connectivity.</span></div>
-                  <div class="lane-row"><strong>Played state</strong><span>Send one or more app IDs to the active session.</span></div>
-                  <div class="lane-row"><strong>Health loop</strong><span>Monitor disconnects, conflicts, and recovery.</span></div>
+                <div class="editor-message" id="editor-runtime-message">
+                  No booster message yet.
                 </div>
-              </article>
+                <div class="editor-message editor-message--muted" id="editor-library-message">
+                  Library validation details will appear here.
+                </div>
 
-              <article class="card">
-                <div class="eyebrow">MULTI-SLOT STRATEGY</div>
-                <h3>Slot-aware runtime planning</h3>
-                <div class="meta-list">
-                  <div><span>Per-account ceiling</span><strong id="runtime-slot-ceiling">32 app IDs</strong></div>
-                  <div><span>Visible status priority</span><strong>Primary slot first</strong></div>
-                  <div><span>Conflict policy</span><strong id="runtime-conflict-policy">Loading</strong></div>
-                  <div><span>Reconnect posture</span><strong id="runtime-reconnect-posture">Loading</strong></div>
-                </div>
-              </article>
-            </section>
-
-            <article class="card runtime-control-card">
-              <div class="card-header">
-                <div>
-                  <div class="eyebrow">RUNTIME CONTROL</div>
-                  <h3>Session-backed lane orchestration</h3>
-                </div>
-                <span class="pill pill--subtle" id="runtime-mode-pill">Steam client transport</span>
-              </div>
-              <p class="card-copy">
-                Saved session bundles are resolved at startup and each account is classified before a boost lane can start. The runtime controller now hands ready accounts into the live Steam client transport, tracks lane transitions, and persists operator-visible events to disk.
-              </p>
-
-              <div class="status-banner status-banner--hidden" id="runtime-status"></div>
-
-              <div class="form-actions runtime-actions">
-                <button class="action-button" id="runtime-start-all-button">Start Ready Lanes</button>
-                <button class="secondary-button" id="runtime-stop-all-button">Stop All Lanes</button>
-                <button class="ghost-button" id="runtime-refresh-button">Refresh Readiness</button>
-              </div>
-
-              <div class="runtime-summary-grid">
-                <div>
-                  <span>Ready accounts</span>
-                  <strong id="runtime-ready-count">0</strong>
-                </div>
-                <div>
-                  <span>Boosting lanes</span>
-                  <strong id="runtime-boosting-count">0</strong>
-                </div>
-                <div>
-                  <span>Paused lanes</span>
-                  <strong id="runtime-paused-count">0</strong>
-                </div>
-                <div>
-                  <span>Blocked lanes</span>
-                  <strong id="runtime-blocked-count">0</strong>
-                </div>
-                <div>
-                  <span>Library blocked</span>
-                  <strong id="runtime-validation-blocked-count">0</strong>
-                </div>
-                <div>
-                  <span>Validation unavailable</span>
-                  <strong id="runtime-validation-unavailable-count">0</strong>
-                </div>
-                <div>
-                  <span>Active slots</span>
-                  <strong id="runtime-active-slot-count">0</strong>
-                </div>
-                <div>
-                  <span>Library verified</span>
-                  <strong id="runtime-validation-verified-count">0</strong>
-                </div>
-                <div>
-                  <span>Transport</span>
-                  <strong id="runtime-transport-name">Loading</strong>
-                </div>
-              </div>
-            </article>
-
-            <article class="card">
-              <div class="card-header">
-                <div>
-                  <div class="eyebrow">ACCOUNT LANES</div>
-                  <h3>Per-account runtime readiness</h3>
-                </div>
-                <span class="pill pill--subtle" id="runtime-accounts-pill">0 tracked</span>
-              </div>
-              <p class="card-copy">
-                Each lane reports its saved-session posture, active slot set, reconnect status, and whether it can be started or stopped from the shell right now.
-              </p>
-              <div class="runtime-account-list" id="runtime-account-list"></div>
-            </article>
-
-            <article class="card card--log">
-              <div class="card-header">
-                <div>
-                  <div class="eyebrow">ACTIVITY CONSOLE</div>
-                  <h3>Runtime controller log</h3>
-                </div>
-                <div class="card-header__actions">
-                  <button class="ghost-button" id="runtime-open-log-button">Open Log</button>
-                  <button class="ghost-button" id="runtime-open-logs-button">Open Logs</button>
-                  <button class="secondary-button" id="runtime-export-snapshot-button">Export Snapshot</button>
-                </div>
-              </div>
-              <div class="meta-list">
-                <div><span>Log file</span><strong id="runtime-log-path">Loading</strong></div>
-                <div><span>Captured events</span><strong id="runtime-event-count">0</strong></div>
-              </div>
-              <pre id="runtime-log">[runtime] runtime controller initialized
-[runtime] persistent event log active
-[runtime] waiting for live runtime activity</pre>
-            </article>
-          </section>
-
-          <section class="page" data-page="settings">
-            <div class="status-banner status-banner--hidden" id="settings-status"></div>
-            <section class="three-up">
-              <article class="card">
-                <div class="eyebrow">CONFIGURATION</div>
-                <h3>Current shell state</h3>
-                <div class="meta-list">
-                  <div><span>Theme</span><strong id="settings-theme">Loading</strong></div>
-                  <div><span>Last page</span><strong id="settings-last-page">Loading</strong></div>
-                  <div><span>Window size</span><strong id="settings-window-size">Loading</strong></div>
-                  <div><span>Config path</span><strong id="settings-config-path">Loading</strong></div>
-                </div>
                 <div class="form-actions">
-                  <button class="action-button" id="settings-open-config-button">Open Config</button>
+                  <button class="action-button" id="account-save-button">Save</button>
                 </div>
-              </article>
+              </div>
 
-              <article class="card">
-                <div class="eyebrow">SESSION STORAGE</div>
-                <h3>Separated local runtime folders</h3>
-                <div class="meta-list">
-                  <div><span>Sessions directory</span><strong id="settings-sessions-path">Loading</strong></div>
-                  <div><span>Logs directory</span><strong id="settings-logs-path">Loading</strong></div>
-                  <div><span>Runtime log file</span><strong id="settings-runtime-log-path">Loading</strong></div>
-                  <div><span>Secrets in config</span><strong>No</strong></div>
-                </div>
-                <div class="form-actions">
-                  <button class="action-button" id="settings-open-sessions-button">Open Sessions</button>
-                  <button class="secondary-button" id="settings-open-logs-button">Open Logs</button>
-                </div>
-              </article>
-
-              <article class="card">
-                <div class="eyebrow">DELIVERY DISCIPLINE</div>
-                <h3>How this repo is being built</h3>
-                <ul class="plain-list">
-                  <li>Each patch should leave the app in a usable state.</li>
-                  <li>GitHub is used as patch history, not as the main work surface.</li>
-                  <li>The shell is intentionally custom and frameless from the start.</li>
-                </ul>
-              </article>
             </section>
-          </section>
-        </main>
-      </div>
+
+            <div class="footer-note">Powered by SteamCommunityKit</div>
+          </div>
+        </section>
+      </main>
     </div>
 
     <script>

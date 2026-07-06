@@ -94,6 +94,7 @@ class DesktopApi:
         )
         self._window = None
         self._maximized = False
+        self._activity_log: List[str] = []
         self._pending_qr_logins: Dict[str, PendingQRLoginRecord] = {}
         self._path_opener = path_opener or self._default_path_opener
         self._sync_runtime_profiles()
@@ -137,6 +138,7 @@ class DesktopApi:
                 "height": self._config.window_height,
             },
             "accounts": [self._serialize_account(account) for account in self._config.accounts],
+            "activity_log": self._build_activity_log(runtime_snapshot),
             "runtime": {
                 "slot_ceiling": 32,
                 "conflict_policy": "Per-account policy with pause, force-kick, or yield",
@@ -171,6 +173,7 @@ class DesktopApi:
                 steam_guard_code=steam_guard_code,
                 prompt_for_steam_guard=False,
             )
+            self._append_activity("Credential sign-in completed for %s." % account_name)
             return self._upsert_authenticated_account(
                 session=session,
                 display_name=display_name or account_name,
@@ -180,9 +183,18 @@ class DesktopApi:
         except SteamAuthenticationError as exc:
             steam_guard_result = self._steam_guard_required_result(exc)
             if steam_guard_result is not None:
+                self._append_activity("Steam Guard is required for %s." % account_name)
                 return steam_guard_result
+            self._append_activity(
+                "Credential sign-in failed for %s: %s"
+                % (account_name, str(exc).strip() or "Unknown error.")
+            )
             return self._error_result(exc)
         except Exception as exc:
+            self._append_activity(
+                "Credential sign-in failed for %s: %s"
+                % (account_name, str(exc).strip() or "Unknown error.")
+            )
             return self._error_result(exc)
 
     def login_account_with_refresh_token(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -192,6 +204,7 @@ class DesktopApi:
 
         try:
             session = self._auth_gateway.login_with_refresh_token(refresh_token)
+            self._append_activity("Refresh token sign-in completed.")
             return self._upsert_authenticated_account(
                 session=session,
                 display_name=display_name,
@@ -199,6 +212,9 @@ class DesktopApi:
                 success_message="Refresh-token login completed and session bundle saved.",
             )
         except Exception as exc:
+            self._append_activity(
+                "Refresh token sign-in failed: %s" % (str(exc).strip() or "Unknown error.")
+            )
             return self._error_result(exc)
 
     def begin_qr_account_login(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -213,6 +229,7 @@ class DesktopApi:
             pending = self._auth_gateway.begin_qr_login(
                 device_friendly_name=device_friendly_name
             )
+            self._append_activity("QR sign-in started.")
             pending_id = uuid4().hex
             record = PendingQRLoginRecord(
                 pending_id=pending_id,
@@ -256,6 +273,7 @@ class DesktopApi:
                 }
 
             self._pending_qr_logins.pop(record.pending_id, None)
+            self._append_activity("QR sign-in approved.")
             result = self._upsert_authenticated_account(
                 session=session,
                 display_name=record.display_name,
@@ -267,6 +285,9 @@ class DesktopApi:
             return result
         except Exception as exc:
             self._pending_qr_logins.pop(record.pending_id, None)
+            self._append_activity(
+                "QR sign-in failed: %s" % (str(exc).strip() or "Unknown error.")
+            )
             return self._error_result(exc, status="error")
 
     def cancel_qr_account_login(self, pending_id: str) -> Dict[str, Any]:
@@ -277,6 +298,7 @@ class DesktopApi:
                 status="not_found",
                 message="This QR login session is no longer available.",
             )
+        self._append_activity("QR sign-in cancelled.")
         return self._message_result(
             ok=True,
             status="cancelled",
@@ -300,6 +322,7 @@ class DesktopApi:
             else:
                 self._session_store.delete_bundle(account.profile_id)
             self._config.accounts.pop(index)
+            self._append_activity("Removed account %s." % self._account_identity_label(account))
             self._persist()
             self._sync_runtime_profiles()
             return {
@@ -1150,6 +1173,16 @@ class DesktopApi:
             or str(account.steam_id or "").strip()
             or str(account.profile_id or "").strip()
         )
+
+    def _append_activity(self, message: str) -> None:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self._activity_log.append("[%s] %s" % (timestamp, message))
+        self._activity_log = self._activity_log[-80:]
+
+    def _build_activity_log(self, runtime_snapshot: Dict[str, Any]) -> List[str]:
+        recent_events = runtime_snapshot.get("recent_events") or []
+        combined = list(self._activity_log) + list(recent_events)
+        return combined[-120:]
 
     @staticmethod
     def _format_games_text(games: List[IdleGame]) -> str:

@@ -29,7 +29,7 @@ def create_window(api: DesktopApi):
         height=int(config.window_height),
         x=x,
         y=y,
-        min_size=(1240, 780),
+        min_size=(980, 640),
         frameless=True,
         easy_drag=False,
         shadow=True,

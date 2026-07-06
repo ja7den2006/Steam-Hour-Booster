@@ -220,6 +220,7 @@ def test_credential_login_creates_account_and_bundle(tmp_path) -> None:
     assert result["account"]["steam_id"] == "7656119"
     assert Path(result["account"]["session_bundle_path"]).exists()
     assert store.load().accounts[0].display_name == "Primary"
+    assert any("Credential sign-in completed" in line for line in result["state"]["activity_log"])
 
 
 def test_credential_login_returns_structured_steam_guard_requirement(tmp_path) -> None:
@@ -268,6 +269,8 @@ def test_qr_flow_polls_then_creates_account(tmp_path) -> None:
     assert approved["ok"] is True
     assert approved["status"] == "approved"
     assert store.load().accounts[0].steam_id == "7656121"
+    assert any("QR sign-in started." in line for line in approved["state"]["activity_log"])
+    assert any("QR sign-in approved." in line for line in approved["state"]["activity_log"])
 
 
 def test_remove_account_deletes_bundle(tmp_path) -> None:
