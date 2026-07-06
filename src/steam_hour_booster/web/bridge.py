@@ -113,7 +113,12 @@ class DesktopApi:
             "last_page": self._config.last_page,
             "counts": {
                 "accounts": len(self._config.accounts),
-                "configured_slots": sum(len(account.games) for account in self._config.accounts),
+                "configured_slots": sum(
+                    1
+                    for account in self._config.accounts
+                    for game in account.games
+                    if game.enabled
+                ),
             },
             "paths": {
                 "config": str(self._config_store.path),
@@ -353,7 +358,10 @@ class DesktopApi:
                 maximum=86400,
             )
             notes = self._normalize_optional_string(values.get("notes"))
-            games = self._parse_games_text(values.get("games_text"))
+            games = self._parse_games_value(
+                values.get("games"),
+                fallback_value=values.get("games_text"),
+            )
 
             if auto_reply_enabled and not auto_reply_message:
                 raise SteamValidationError("Auto-reply message is required when auto-reply is enabled.")
@@ -394,6 +402,7 @@ class DesktopApi:
                 RuntimeState.BOOSTING,
                 RuntimeState.PAUSED,
             ):
+                enabled_games = [game for game in updated.games if game.enabled]
                 if not updated.boost_enabled:
                     runtime_status = self._runtime_controller.stop_profile(
                         updated.profile_id,
@@ -402,7 +411,7 @@ class DesktopApi:
                     success_message = (
                         "Account profile saved and the active lane was stopped because boosting is disabled."
                     )
-                elif updated.games:
+                elif enabled_games:
                     runtime_status = self._runtime_controller.reconfigure_profile(
                         updated.profile_id,
                         self._config.accounts,
@@ -414,7 +423,7 @@ class DesktopApi:
                         self._config.accounts,
                     )
                     success_message = (
-                        "Account profile saved and the active lane was stopped because no slots remain."
+                        "Account profile saved and the active lane was stopped because no enabled slots remain."
                     )
 
             return {
@@ -922,6 +931,46 @@ class DesktopApi:
             )
         return resolved
 
+    def _parse_games_value(
+        self,
+        value: Any,
+        *,
+        fallback_value: Any = None,
+    ) -> List[IdleGame]:
+        if value is None:
+            return self._parse_games_text(fallback_value)
+        if not isinstance(value, list):
+            raise SteamValidationError("Game queue payload is invalid.")
+
+        games: List[IdleGame] = []
+        seen_app_ids = set()
+        for item in value:
+            if not isinstance(item, dict):
+                raise SteamValidationError("Game queue payload is invalid.")
+
+            app_id_text = self._normalize_optional_string(item.get("app_id"))
+            if not app_id_text.isdigit():
+                raise SteamValidationError("Game app ids must be positive integers.")
+            app_id = int(app_id_text)
+            if app_id <= 0:
+                raise SteamValidationError("Game app ids must be positive integers.")
+            if app_id in seen_app_ids:
+                continue
+
+            seen_app_ids.add(app_id)
+            games.append(
+                IdleGame(
+                    app_id=app_id,
+                    title=self._normalize_optional_string(item.get("title")),
+                    enabled=self._normalize_bool(item.get("enabled"), default=True),
+                )
+            )
+
+        if len(games) > 32:
+            raise SteamValidationError("A single account can only queue up to 32 game slots.")
+
+        return games
+
     @staticmethod
     def _effective_persona_state(account: AccountProfile) -> str:
         if not account.appear_online:
@@ -1029,6 +1078,7 @@ class DesktopApi:
             "has_session_bundle": has_session_bundle,
             "session_summary": session_summary,
             "game_count": len(account.games),
+            "enabled_game_count": sum(1 for game in account.games if game.enabled),
             "games": [game.to_dict() for game in account.games],
             "games_text": self._format_games_text(account.games),
         }

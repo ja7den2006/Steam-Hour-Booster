@@ -358,6 +358,52 @@ def test_save_account_profile_updates_runtime_fields(tmp_path) -> None:
     assert result["account"]["effective_persona_state"] == "Invisible"
 
 
+def test_save_account_profile_preserves_structured_game_queue_flags(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                account_name="primary_account",
+                steam_id="7656119",
+                login_mode="credentials",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.save_account_profile(
+        {
+            "profile_id": "steam_7656119",
+            "display_name": "Primary",
+            "persona_state": "Online",
+            "games": [
+                {"app_id": 730, "title": "Counter-Strike 2", "enabled": True},
+                {"app_id": 570, "title": "Dota 2", "enabled": False},
+                {"app_id": 440, "title": "Team Fortress 2", "enabled": True},
+            ],
+        }
+    )
+
+    assert result["ok"] is True
+    saved = store.load().accounts[0]
+    assert [game.app_id for game in saved.games] == [730, 570, 440]
+    assert [game.enabled for game in saved.games] == [True, False, True]
+    assert result["account"]["game_count"] == 3
+    assert result["account"]["enabled_game_count"] == 2
+    assert result["state"]["counts"]["configured_slots"] == 2
+
+
 def test_save_account_profile_reconfigures_active_preview_lane(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     session_store = SessionStore(base_dir=tmp_path / "sessions")
@@ -399,6 +445,53 @@ def test_save_account_profile_reconfigures_active_preview_lane(tmp_path) -> None
     runtime_status = saved["state"]["runtime"]["statuses"][0]
     assert runtime_status["state"] == "boosting"
     assert runtime_status["active_app_ids"] == [730, 570]
+
+
+def test_save_account_profile_stops_active_preview_lane_when_all_slots_disabled(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                account_name="primary_account",
+                steam_id="7656119",
+                login_mode="credentials",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730), IdleGame(app_id=570)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+        runtime_controller=preview_runtime_controller(session_store),
+    )
+
+    started = api.start_account_runtime("steam_7656119")
+    saved = api.save_account_profile(
+        {
+            "profile_id": "steam_7656119",
+            "display_name": "Primary",
+            "persona_state": "Online",
+            "games": [
+                {"app_id": 730, "title": "Counter-Strike 2", "enabled": False},
+                {"app_id": 570, "title": "Dota 2", "enabled": False},
+            ],
+        }
+    )
+
+    assert started["ok"] is True
+    assert saved["ok"] is True
+    assert "no enabled slots remain" in saved["message"].lower()
+    runtime_status = saved["state"]["runtime"]["statuses"][0]
+    assert runtime_status["state"] == "idle"
+    assert runtime_status["configured_app_ids"] == []
+    assert runtime_status["can_start"] is False
 
 
 def test_save_account_profile_disables_active_preview_lane(tmp_path) -> None:

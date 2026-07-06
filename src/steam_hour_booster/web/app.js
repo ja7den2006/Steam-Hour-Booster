@@ -278,11 +278,21 @@ function bindAccountActions() {
   const gameList = document.getElementById('editor-games-list');
   if (gameList) {
     gameList.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-game-remove-app-id]');
-      if (!target?.dataset.gameRemoveAppId) {
+      const target = event.target.closest('[data-game-action]');
+      if (!target?.dataset.gameAction || !target?.dataset.gameAppId) {
         return;
       }
-      removeEditorGame(Number(target.dataset.gameRemoveAppId));
+      const action = target.dataset.gameAction;
+      const appId = Number(target.dataset.gameAppId);
+      if (action === 'remove') {
+        removeEditorGame(appId);
+      } else if (action === 'toggle') {
+        toggleEditorGameEnabled(appId);
+      } else if (action === 'up') {
+        moveEditorGame(appId, -1);
+      } else if (action === 'down') {
+        moveEditorGame(appId, 1);
+      }
     });
   }
 
@@ -446,7 +456,7 @@ function fillAccounts() {
         <div><span>Runtime</span><strong>${escapeHtml(runtimeStatus?.state_label || 'Pending')}</strong></div>
         <div><span>Presence</span><strong>${escapeHtml(account.effective_persona_state || account.persona_state || 'Online')}</strong></div>
         <div><span>Policy</span><strong>${escapeHtml(formatConflictPolicy(account.conflict_policy))}</strong></div>
-        <div><span>Games</span><strong>${account.game_count}</strong></div>
+        <div><span>Games</span><strong>${escapeHtml(formatGameQueueSummary(account.enabled_game_count || 0, account.game_count || 0))}</strong></div>
         <div><span>Session</span><strong>${runtimeStatus ? (runtimeStatus.session_ready ? 'Ready' : 'Missing') : (account.has_session_bundle ? 'Saved' : 'Missing')}</strong></div>
         <div><span>Library</span><strong>${escapeHtml(runtimeStatus?.owned_games_validation_label || 'Pending')}</strong></div>
       </div>
@@ -474,7 +484,7 @@ function fillAccountEditor() {
       editorEmpty.classList.remove('editor-empty--hidden');
     }
     setText('account-editor-title', 'Runtime-ready account settings');
-    setText('account-editor-slot-pill', '0 slots');
+    setText('account-editor-slot-pill', '0 active');
     shellState.editorGames = [];
     renderEditorGames();
     setChecked('editor-auto-reply-enabled', false);
@@ -491,7 +501,10 @@ function fillAccountEditor() {
   }
 
   setText('account-editor-title', profile.display_name || profile.account_name || profile.steam_id);
-  setText('account-editor-slot-pill', `${profile.game_count} slot${profile.game_count === 1 ? '' : 's'}`);
+  setText(
+    'account-editor-slot-pill',
+    formatGameQueueSummary(profile.enabled_game_count || 0, profile.game_count || 0),
+  );
 
   setChecked('editor-boost-enabled', Boolean(profile.boost_enabled));
   setChecked('editor-appear-online', profile.appear_online !== false);
@@ -1172,8 +1185,9 @@ function renderEditorGames() {
   list.innerHTML = '';
 
   const games = shellState.editorGames || [];
-  setText('editor-games-count-pill', `${games.length} slot${games.length === 1 ? '' : 's'}`);
-  setText('account-editor-slot-pill', `${games.length} slot${games.length === 1 ? '' : 's'}`);
+  const enabledCount = games.filter((game) => game.enabled !== false).length;
+  setText('editor-games-count-pill', formatGameQueueSummary(enabledCount, games.length));
+  setText('account-editor-slot-pill', formatGameQueueSummary(enabledCount, games.length));
 
   if (!games.length) {
     empty.classList.remove('game-slot-empty--hidden');
@@ -1181,15 +1195,23 @@ function renderEditorGames() {
   }
 
   empty.classList.add('game-slot-empty--hidden');
-  games.forEach((game) => {
+  games.forEach((game, index) => {
     const item = document.createElement('div');
-    item.className = 'game-slot-item';
+    item.className = `game-slot-item${game.enabled === false ? ' game-slot-item--disabled' : ''}`;
     item.innerHTML = `
       <div class="game-slot-item__copy">
-        <strong>${escapeHtml(game.title || `App ${game.app_id}`)}</strong>
-        <small>${escapeHtml(String(game.app_id))}</small>
+        <div class="game-slot-item__title-row">
+          <strong>${escapeHtml(game.title || `App ${game.app_id}`)}</strong>
+          <span class="pill pill--subtle">${game.enabled === false ? 'Disabled' : 'Armed'}</span>
+        </div>
+        <small>${escapeHtml(`App ${game.app_id} • Queue ${index + 1}`)}</small>
       </div>
-      <button class="ghost-button" data-game-remove-app-id="${escapeHtml(String(game.app_id))}">Remove</button>
+      <div class="game-slot-item__actions">
+        <button class="ghost-button" data-game-action="up" data-game-app-id="${escapeHtml(String(game.app_id))}" ${index === 0 ? 'disabled' : ''}>Up</button>
+        <button class="ghost-button" data-game-action="down" data-game-app-id="${escapeHtml(String(game.app_id))}" ${index === (games.length - 1) ? 'disabled' : ''}>Down</button>
+        <button class="ghost-button" data-game-action="toggle" data-game-app-id="${escapeHtml(String(game.app_id))}">${game.enabled === false ? 'Enable' : 'Disable'}</button>
+        <button class="ghost-button" data-game-action="remove" data-game-app-id="${escapeHtml(String(game.app_id))}">Remove</button>
+      </div>
     `;
     list.appendChild(item);
   });
@@ -1209,8 +1231,29 @@ function addGameToEditor(appId, title = '') {
     return;
   }
 
-  const existing = (shellState.editorGames || []).some((game) => Number(game.app_id) === numericAppId);
-  if (existing) {
+  const existingIndex = findEditorGameIndex(numericAppId);
+  if (existingIndex >= 0) {
+    const nextGames = [...(shellState.editorGames || [])];
+    const existingGame = { ...nextGames[existingIndex] };
+    if (!existingGame.title && String(title || '').trim()) {
+      existingGame.title = String(title || '').trim();
+    }
+    if (existingGame.enabled === false) {
+      existingGame.enabled = true;
+      nextGames[existingIndex] = existingGame;
+      shellState.editorGames = nextGames;
+      renderEditorGames();
+      setEditorStatus('success', `Re-enabled app ${numericAppId} in the boost queue.`);
+      return;
+    }
+    if (
+      existingGame.title !== nextGames[existingIndex].title
+      || existingGame.enabled !== nextGames[existingIndex].enabled
+    ) {
+      nextGames[existingIndex] = existingGame;
+      shellState.editorGames = nextGames;
+      renderEditorGames();
+    }
     setEditorStatus('info', `App ${numericAppId} is already in this account queue.`);
     return;
   }
@@ -1254,6 +1297,46 @@ function removeEditorGame(appId) {
   setEditorStatus('info', `Removed app ${appId} from the boost queue.`);
 }
 
+function toggleEditorGameEnabled(appId) {
+  const index = findEditorGameIndex(appId);
+  if (index < 0) {
+    return;
+  }
+  const nextGames = [...(shellState.editorGames || [])];
+  const nextGame = { ...nextGames[index] };
+  nextGame.enabled = !(nextGame.enabled !== false);
+  nextGames[index] = nextGame;
+  shellState.editorGames = nextGames;
+  renderEditorGames();
+  setEditorStatus(
+    'info',
+    nextGame.enabled === false
+      ? `Disabled app ${appId} without removing it from the queue.`
+      : `Re-enabled app ${appId} in the queue.`,
+  );
+}
+
+function moveEditorGame(appId, direction) {
+  const index = findEditorGameIndex(appId);
+  if (index < 0) {
+    return;
+  }
+  const nextIndex = index + Number(direction || 0);
+  const games = [...(shellState.editorGames || [])];
+  if (nextIndex < 0 || nextIndex >= games.length) {
+    return;
+  }
+  const [game] = games.splice(index, 1);
+  games.splice(nextIndex, 0, game);
+  shellState.editorGames = games;
+  renderEditorGames();
+  setEditorStatus('info', `Moved app ${appId} to queue position ${nextIndex + 1}.`);
+}
+
+function findEditorGameIndex(appId) {
+  return (shellState.editorGames || []).findIndex((game) => Number(game.app_id) === Number(appId));
+}
+
 function getSelectedAccount() {
   return (shellState.bootstrap.accounts || []).find(
     (account) => account.profile_id === shellState.selectedAccountProfileId,
@@ -1292,6 +1375,11 @@ async function saveAccountProfile() {
     auto_reply_message: getValue('editor-auto-reply-message'),
     auto_reply_cooldown_seconds: getValue('editor-auto-reply-cooldown'),
     auto_reply_timeout_seconds: getValue('editor-auto-reply-timeout'),
+    games: (shellState.editorGames || []).map((game) => ({
+      app_id: Number(game.app_id),
+      title: String(game.title || ''),
+      enabled: game.enabled !== false,
+    })),
     games_text: getValue('editor-games-text'),
     notes: getValue('editor-notes'),
   });
@@ -1533,6 +1621,18 @@ function formatOwnedGamesValidationDetail(status) {
     ? ` Checked ${formatRuntimeTimestamp(status.owned_games_validation_checked_at)}.`
     : '';
   return `${formatOwnedGamesValidationState(status.owned_games_validation_state)}. ${message}${checkedAt}`;
+}
+
+function formatGameQueueSummary(enabledCount, totalCount) {
+  const enabled = Number(enabledCount || 0);
+  const total = Number(totalCount || 0);
+  if (!total) {
+    return '0 active';
+  }
+  if (enabled === total) {
+    return `${enabled} active`;
+  }
+  return `${enabled} active / ${total} total`;
 }
 
 function formatRuntimeTimestamp(value) {
