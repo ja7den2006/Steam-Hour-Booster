@@ -245,6 +245,15 @@ select {
   gap: 12px;
 }
 
+.card-header {
+  margin-bottom: 16px;
+}
+
+.auth-card > .card-header,
+.editor-card > .card-header {
+  margin-bottom: 0;
+}
+
 .card-header > div,
 .summary-card__header > div:first-child,
 .account-item__header > div:first-child,

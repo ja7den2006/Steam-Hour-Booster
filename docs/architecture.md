@@ -15,7 +15,8 @@ The application is being built in layers so each patch leaves the repo in a usab
 - `pywebview` for a frameless desktop host
 - custom `HTML/CSS/JS` for the branded shell
 - `SteamCommunityKit` for Steam web authentication/session flows only
-- `ValvePython/steam` for the Steam client protocol runtime
+- `steam-user` and `steam-session` for modern Steam client authorization
+- `ValvePython/steam` for the current live Steam client played-state runtime
 
 ## Boundaries
 
@@ -33,7 +34,7 @@ Because the UI itself is web-based, the shell can still be moved to a different 
 
 ### Authentication gateway
 
-The auth layer wraps `SteamCommunityKit` and normalizes:
+The web auth layer wraps `SteamCommunityKit` and normalizes:
 
 - credential login
 - Steam Guard email/app code flows
@@ -43,9 +44,14 @@ The auth layer wraps `SteamCommunityKit` and normalizes:
 
 This prevents the rest of the application from directly depending on `SteamCommunityKit` response shapes.
 
+Steam client authorization is a separate boundary. The Python app launches a bundled Node bridge that uses `steam-user`
+and `steam-session` to obtain a SteamClient refresh token through the modern Steam auth path. That client token is stored
+as `client_refresh_token` inside the saved account bundle while the SteamCommunityKit web token remains available for
+web-session validation.
+
 ### Runtime boundary
 
-The boost runtime now sits behind internal contracts so the desktop shell stays independent from the protocol implementation. The current live engine uses `ValvePython/steam` with refresh-token client logon sourced from the saved `SteamCommunityKit` bundle, plus cached login-key reuse for reconnects, for:
+The boost runtime now sits behind internal contracts so the desktop shell stays independent from the protocol implementation. The current live engine uses `ValvePython/steam` with the saved SteamClient refresh token, plus cached login-key reuse for reconnects, for:
 
 - account session startup
 - concurrent game-slot play state
@@ -73,6 +79,7 @@ Secrets should not be written into the main config payload.
 - saved community session bundle persistence per account
 - runtime-facing account profile editing and slot-list validation
 - startup runtime readiness classification and per-account lane state
+- modern Steam client authorization through the bundled Node bridge
 - desktop runtime controls backed by a live Steam client transport
 - reconnect-aware lane telemetry surfaced back into the desktop shell
 - cached login-key reuse, conflict policy handling, and live slot/persona updates for active lanes

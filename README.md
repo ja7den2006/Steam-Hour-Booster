@@ -1,107 +1,146 @@
 # Steam Hour Booster
 
-`Steam Hour Booster` is a desktop-first Steam hour boosting project built for real account workflows, staged patch-by-patch with local development first and GitHub used as backup history.
+Steam Hour Booster is a desktop app for running Steam played-state hour boosting across one or more Steam accounts. It uses a custom `pywebview` shell, SteamCommunityKit for web authentication, and a Node-backed Steam client bridge for modern Steam client authorization.
 
-This repository starts with the production foundation:
+The app is built as a local-first desktop tool. Account sessions, runtime cache, and logs stay on the local machine under the user's app data directory.
 
-- a custom frameless desktop shell hosted in `pywebview`
-- a professional project layout with packaging and CI
-- config and session storage models
-- a SteamCommunityKit-backed authentication boundary for:
-  - credential login
-  - Steam Guard email codes
-  - Steam Guard mobile codes
-  - refresh-token reuse
-  - QR login session approval
+> This project is not affiliated with Valve or Steam. Use it only with accounts you own. Steam account automation may carry account risk, so review Steam's current rules before using it.
 
-## Current Scope
+## Features
 
-The current repository state now covers the shell, auth boundary, and a live Steam client runtime with the first hardening pass:
+- Custom frameless desktop UI with overview, account management, activity logs, and per-account editing.
+- Username/password login with Steam Guard email or app-code follow-up.
+- QR-code login through SteamCommunityKit.
+- Separate Steam client authorization through `steam-user` / `steam-session`.
+- Multiple saved Steam accounts with separate settings per account.
+- Per-account boost toggle and appear-online/invisible behavior.
+- Up to 32 configured app slots per account.
+- Popular game presets plus custom App ID entries.
+- Owned-game validation when a Steam Web API key is available.
+- Start/stop controls for one account or all ready accounts.
+- Conflict handling for other sessions playing games: pause, force kick, or yield.
+- Auto-reply settings with custom message, cooldown, and timeout.
+- Runtime event log and in-app diagnostics.
 
-- branded desktop shell and page structure
-- durable config and session storage
-- auth gateway abstractions wired to `SteamCommunityKit`
-- account onboarding through:
-  - username and password login
-  - Steam Guard email or app code follow-up
-  - refresh-token login
-  - QR challenge start and approval polling
-- saved session bundle persistence per account
-- account list and removal workflow
-- runtime-facing account profile editing:
-  - persona state
-  - custom status
-  - slot list up to 32 app IDs
-  - operator notes
-  - session bundle metadata visibility
-- startup runtime readiness classification from saved session bundles
-- runtime lane controls through the desktop shell:
-  - refresh readiness
-  - start a single ready lane
-  - stop a running lane
-  - start or stop all lanes
-- a runtime controller with activity logging, ready/boosting/error counts, and per-account lane status cards
-- a live Steam CM transport using `ValvePython/steam` and refresh-token client logon
-- cached login-key reuse after a successful client session
-- reconnect/backoff handling for dropped live lanes
-- live lane reconfiguration for slot and persona changes without forcing a full stop/start cycle
-- per-account conflict handling with pause or force-kick policy
-- persistent runtime event logging under local app data
-- in-app desktop actions for opening config, sessions, logs, and saved session bundles
-- runtime snapshot export from the shell for operator diagnostics
-- operator-facing runtime telemetry for auth source, reconnect count, and last runtime issue
-- test coverage for config, auth mapping, session storage, and desktop bridge behavior
+## Requirements
 
-The current live path already sends real Steam client played-state lanes, reconnects dropped lanes, reuses cached login keys, enforces conflict policy, and persists an operator-visible runtime log while a lane is active. The remaining work is broader protocol breadth such as more explicit custom-status transport behavior, tray/packaging polish, and deeper release shaping.
+- Windows 10/11.
+- Python 3.8 or newer.
+- Node.js with npm.
+- Microsoft Edge WebView2 Runtime for `pywebview`.
+- A Steam account you own.
 
-## Local Development
+## Quick Start
 
-```bash
-pip install -e .[dev]
-python -m steam_hour_booster
-```
-
-PowerShell shortcut on Windows:
+Clone the repository, then run the desktop app from the project root.
 
 ```powershell
-.\run_dev.ps1
+powershell -ExecutionPolicy Bypass -File .\run_dev.ps1
 ```
 
-If you already installed dependencies and only want to relaunch the shell:
+The launcher installs Python dependencies and Node bridge dependencies before starting the app.
+
+If dependencies are already installed:
 
 ```powershell
-.\run_dev.ps1 -SkipInstall
+powershell -ExecutionPolicy Bypass -File .\run_dev.ps1 -SkipInstall
 ```
 
-If PowerShell script execution is blocked on your machine, use the policy-safe batch launcher instead:
+Batch launcher:
 
 ```bat
 run_dev.cmd
 run_dev.cmd -SkipInstall
 ```
 
-Or run PowerShell once with a process-local bypass:
+Manual setup:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run_dev.ps1 -SkipInstall
+python -m pip install -e ".[dev]"
+npm install
+python -m steam_hour_booster
 ```
+
+## Basic Use
+
+1. Open the app.
+2. Add a Steam account with username/password or QR login.
+3. If the account shows `Needs Auth`, open the account editor and run `Finish booster sign-in`.
+4. Add game App IDs through presets or custom entries.
+5. Save the account profile.
+6. Start the account from Overview.
+
+The console panel shows authentication and runtime activity such as account start, stop, reconnect, and conflict state.
+
+## Local Data
+
+Runtime data is stored outside the repository:
+
+```text
+%LOCALAPPDATA%\SteamHourBooster\
+```
+
+Important paths:
+
+- `config.json`: app preferences and non-secret account profile settings.
+- `sessions\`: SteamCommunityKit session bundles, Steam client auth metadata, and local runtime cache.
+- `logs\runtime.log`: runtime event log.
+
+Do not commit local runtime data, `.env` files, credentials, screenshots containing account secrets, or the contents of `%LOCALAPPDATA%\SteamHourBooster`.
+
+Optional local icon assets can be placed at `tmp\steam_icon.ico` and `tmp\steam_icon.png` for development builds. They are intentionally ignored so branded third-party assets are not redistributed from this repository.
+
+## Development
 
 Run tests:
 
-```bash
-pytest -q
+```powershell
+python -m pytest
 ```
 
-## Project Notes
+Run a Node bridge smoke check:
 
-- Python `3.8+` is supported.
-- `SteamCommunityKit` is used only for authentication/session workflows in this app.
-- `ValvePython/steam` is used for the Steam client protocol runtime that sends the played-game slot set.
-- The desktop shell is delivered as a custom HTML/CSS/JS surface inside a local `pywebview` host so it remains compatible with the current Python `3.8` environment.
-- On Windows, `pywebview` expects an available WebView runtime. If the shell opens blank on a clean machine, install Microsoft Edge WebView2 Runtime first.
-- The shell remains portable because the UI surface is web-based, so moving only the host to a Go/Wails shell later is still possible without throwing away the front-end work.
-- Account session bundles are stored under local app data instead of being embedded in the main config payload.
+```powershell
+npm run smoke:steam-bridge
+```
 
-## Repository Intent
+Compile Python sources:
 
-This repository is being built as a professional desktop application, not a throwaway script bundle. Each patch is expected to be locally verified and pushed as a clean GitHub backup increment.
+```powershell
+python -m compileall src
+```
+
+## Architecture
+
+The app is split into clear boundaries:
+
+- `steam_hour_booster.web`: HTML/CSS/JS desktop shell and pywebview bridge.
+- `steam_hour_booster.auth.community`: SteamCommunityKit web auth and session bundle handling.
+- `steam_hour_booster.auth.client`: Node Steam client bridge wrapper for modern client refresh-token authorization.
+- `steam_hour_booster.runtime`: live played-state runtime, reconnect handling, conflict policy, and telemetry.
+- `steam_hour_booster.session_store`: local bundle/cache storage under app data.
+
+The Steam client auth bridge depends on:
+
+- `steam-session`: modern Steam auth/session flow.
+- `steam-user`: Steam client login, refresh-token handling, `gamesPlayed`, conflict state, and chat events.
+
+## Current Status
+
+This is an alpha desktop application with a working local runtime path. It is suitable for public source review and local development, but it is not yet packaged as a signed end-user installer.
+
+Recommended next release hardening:
+
+- Signed Windows build artifact.
+- Installer/uninstaller workflow.
+- First-run dependency checks inside the UI.
+- Clearer release notes and screenshots.
+- Upstream tracking for `steam-user` transitive npm audit advisories.
+
+## Known Dependency Note
+
+`steam-user` currently pulls a transitive `steam-appticket` dependency that npm audit flags through an older nested `protobufjs`. The app needs the current `steam-user` 5.x refresh-token path; npm's suggested forced audit fix downgrades `steam-user` and is not compatible with the runtime. Track upstream fixes before publishing packaged binaries.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
