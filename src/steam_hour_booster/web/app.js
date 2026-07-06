@@ -39,6 +39,8 @@ const shellState = {
   pendingCredentialLogin: null,
   selectedAccountProfileId: null,
   editorGames: [],
+  editorDirty: false,
+  editorHydratedProfileId: null,
   pendingQrLogin: null,
   qrPollTimer: null,
   runtimePollTimer: null,
@@ -49,6 +51,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindWindowControls();
   bindAuthModes();
   bindAccountActions();
+  bindEditorDraftInputs();
   bindOverviewActions();
   await waitForBridge();
   await hydrate();
@@ -564,6 +567,7 @@ function bindAccountActions() {
       const selectedCard = event.target.closest('[data-account-select]');
       if (selectedCard?.dataset.profileId) {
         shellState.selectedAccountProfileId = selectedCard.dataset.profileId;
+        resetEditorDraftState(null);
         fillAccounts();
         fillAccountEditor();
       }
@@ -615,6 +619,32 @@ function bindAccountActions() {
   if (autoReplyToggle) {
     autoReplyToggle.addEventListener('change', updateAutoReplyEditorState);
   }
+}
+
+function bindEditorDraftInputs() {
+  const editorInputIds = [
+    'editor-boost-enabled',
+    'editor-appear-online',
+    'editor-display-name',
+    'editor-persona-state',
+    'editor-conflict-policy',
+    'editor-preset-game',
+    'editor-custom-app-id',
+    'editor-custom-game-title',
+    'editor-auto-reply-enabled',
+    'editor-auto-reply-message',
+    'editor-auto-reply-cooldown',
+    'editor-auto-reply-timeout',
+  ];
+
+  editorInputIds.forEach((id) => {
+    const element = document.getElementById(id);
+    if (!element) {
+      return;
+    }
+    element.addEventListener('input', markEditorDirty);
+    element.addEventListener('change', markEditorDirty);
+  });
 }
 
 function fillOverview() {
@@ -762,19 +792,21 @@ function fillAccountEditor() {
   const editorEmpty = document.getElementById('account-editor-empty');
   const profile = getSelectedAccount();
   const runtimeStatus = getSelectedRuntimeStatus();
+  const preserveDraft = shouldPreserveEditorDraft(profile);
 
   hydratePersonaOptions();
   hydrateConflictPolicyOptions();
   hydratePopularGameOptions();
 
   if (!profile) {
+    resetEditorDraftState(null);
     if (editorShell) {
       editorShell.classList.add('editor-shell--hidden');
     }
     if (editorEmpty) {
       editorEmpty.classList.remove('editor-empty--hidden');
     }
-    setText('account-editor-title', 'Select an account');
+    setEditorIdentity(null);
     setText('account-editor-slot-pill', '0 games');
     shellState.editorGames = [];
     renderEditorGames();
@@ -795,11 +827,18 @@ function fillAccountEditor() {
     editorEmpty.classList.add('editor-empty--hidden');
   }
 
-  setText('account-editor-title', profile.display_name || profile.account_name || profile.steam_id || 'Account');
-  setText(
-    'account-editor-slot-pill',
-    formatGameQueueSummary(profile.enabled_game_count || 0, profile.game_count || 0),
-  );
+  if (preserveDraft) {
+    setEditorIdentity(profile);
+    renderEditorGames();
+    updatePresenceEditorState();
+    updateAutoReplyEditorState();
+    fillEditorHealth(profile, runtimeStatus);
+    return;
+  }
+
+  resetEditorDraftState(profile.profile_id);
+  setEditorIdentity(profile);
+  setText('account-editor-slot-pill', formatGameQueueSummary(profile.enabled_game_count || 0, profile.game_count || 0));
 
   setChecked('editor-boost-enabled', Boolean(profile.boost_enabled));
   setChecked('editor-appear-online', profile.appear_online !== false);
@@ -828,6 +867,46 @@ function fillAccountEditor() {
   updatePresenceEditorState();
   updateAutoReplyEditorState();
   fillEditorHealth(profile, runtimeStatus);
+}
+
+function setEditorIdentity(profile) {
+  if (!profile) {
+    setText('account-editor-title', 'Select an account');
+    setText('account-editor-subtitle', 'Select an account to edit its booster settings.');
+    setText('editor-account-name-label', 'Username');
+    return;
+  }
+
+  const title = profile.display_name || profile.account_name || profile.steam_id || 'Account';
+  const username = profile.account_name || profile.steam_id || 'Unknown account';
+  const isEditing = shellState.editorDirty && shellState.editorHydratedProfileId === profile.profile_id;
+  const editingSuffix = isEditing ? ' (Currently Editing)' : '';
+  setText('account-editor-title', title);
+  setText('account-editor-subtitle', `${username}${editingSuffix}`);
+  setText('editor-account-name-label', `Username${editingSuffix}`);
+}
+
+function shouldPreserveEditorDraft(profile) {
+  return Boolean(
+    profile
+      && shellState.editorDirty
+      && shellState.editorHydratedProfileId === profile.profile_id,
+  );
+}
+
+function markEditorDirty() {
+  const profile = getSelectedAccount();
+  if (!profile) {
+    return;
+  }
+  shellState.editorDirty = true;
+  shellState.editorHydratedProfileId = profile.profile_id;
+  setEditorIdentity(profile);
+}
+
+function resetEditorDraftState(profileId = null) {
+  shellState.editorDirty = false;
+  shellState.editorHydratedProfileId = profileId;
 }
 
 function fillEditorHealth(profile, status) {
@@ -993,6 +1072,7 @@ function addGameToEditor(appId, title = '') {
       existingGame.enabled = true;
       nextGames[existingIndex] = existingGame;
       shellState.editorGames = nextGames;
+      markEditorDirty();
       renderEditorGames();
       setEditorStatus('success', `Re-enabled app ${numericAppId}.`);
       return;
@@ -1014,6 +1094,7 @@ function addGameToEditor(appId, title = '') {
       enabled: true,
     },
   ];
+  markEditorDirty();
   renderEditorGames();
   setEditorStatus('success', `Added app ${numericAppId}.`);
 }
@@ -1036,6 +1117,7 @@ function addCustomGameToEditor() {
 
 function removeEditorGame(appId) {
   shellState.editorGames = (shellState.editorGames || []).filter((game) => Number(game.app_id) !== Number(appId));
+  markEditorDirty();
   renderEditorGames();
   setEditorStatus('info', `Removed app ${appId}.`);
 }
@@ -1050,6 +1132,7 @@ function toggleEditorGameEnabled(appId) {
   nextGame.enabled = !(nextGame.enabled !== false);
   nextGames[index] = nextGame;
   shellState.editorGames = nextGames;
+  markEditorDirty();
   renderEditorGames();
   setEditorStatus('info', nextGame.enabled === false ? `Disabled app ${appId}.` : `Enabled app ${appId}.`);
 }
@@ -1067,6 +1150,7 @@ function moveEditorGame(appId, direction) {
   const [game] = games.splice(index, 1);
   games.splice(nextIndex, 0, game);
   shellState.editorGames = games;
+  markEditorDirty();
   renderEditorGames();
   setEditorStatus('info', `Moved app ${appId} to slot ${nextIndex + 1}.`);
 }
@@ -1111,6 +1195,7 @@ async function saveAccountProfile() {
     target: 'editor',
     successMessage: result?.message || 'Account settings saved.',
     selectProfileId: profile.profile_id,
+    resetEditorDraft: true,
   });
   setButtonBusy('account-save-button', false, 'Save');
 }
@@ -1196,6 +1281,7 @@ async function openRuntimeLogFile() {
 
 async function focusAccountProfile(profileId) {
   shellState.selectedAccountProfileId = profileId;
+  resetEditorDraftState(null);
   fillAccounts();
   fillAccountEditor();
   await selectPage('accounts', true);
@@ -1244,6 +1330,10 @@ async function handleMutationResult(result, options = {}) {
 
   if (options.selectProfileId) {
     shellState.selectedAccountProfileId = options.selectProfileId;
+  }
+
+  if (options.resetEditorDraft) {
+    resetEditorDraftState(options.selectProfileId || null);
   }
 
   if (options.target === 'editor') {

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from steamcommunitykit.exceptions import (
@@ -73,6 +74,9 @@ POPULAR_GAMES = [
     {"app_id": 1172470, "title": "Apex Legends"},
 ]
 
+SESSION_BUNDLE_VALIDATED_AT_KEY = "shb_session_validated_at"
+SESSION_BUNDLE_VALIDATION_INTERVAL_SECONDS = 6 * 60 * 60
+
 
 class DesktopApi:
     def __init__(
@@ -97,7 +101,8 @@ class DesktopApi:
         self._activity_log: List[str] = []
         self._pending_qr_logins: Dict[str, PendingQRLoginRecord] = {}
         self._path_opener = path_opener or self._default_path_opener
-        self._sync_runtime_profiles()
+        self._revalidate_saved_session_bundles()
+        self._sync_runtime_profiles(reason="startup")
 
     @property
     def config(self) -> AppConfig:
@@ -154,7 +159,7 @@ class DesktopApi:
         }
 
     def set_last_page(self, page_key: str) -> Dict[str, Any]:
-        self._config.last_page = page_key or "dashboard"
+        self._config.last_page = page_key or "overview"
         self._persist()
         return {"ok": True}
 
@@ -778,7 +783,8 @@ class DesktopApi:
         steam_id = str(session.steam_id).strip()
         existing = self._find_account_by_steam_id(steam_id)
         profile_id = existing.profile_id if existing else self._session_store.build_profile_id(steam_id)
-        session_path = self._session_store.save_bundle(profile_id, session.session_bundle)
+        session_bundle = self._stamp_session_bundle(dict(session.session_bundle))
+        session_path = self._session_store.save_bundle(profile_id, session_bundle)
 
         resolved_display_name = (
             self._normalize_optional_string(display_name)
@@ -841,6 +847,111 @@ class DesktopApi:
             "account": self._serialize_account(updated),
             "state": self.get_bootstrap_state(),
         }
+
+    def _revalidate_saved_session_bundles(self) -> None:
+        if not self._config.accounts:
+            return
+
+        updated_accounts: List[AccountProfile] = []
+        mutated = False
+        for account in self._config.accounts:
+            updated_account, refreshed = self._revalidate_saved_session_bundle(account)
+            updated_accounts.append(updated_account)
+            if refreshed or updated_account != account:
+                mutated = True
+
+        if mutated:
+            self._config.accounts = updated_accounts
+            self._persist()
+
+    def _revalidate_saved_session_bundle(self, account: AccountProfile) -> Tuple[AccountProfile, bool]:
+        session_path = str(account.session_bundle_path or "").strip()
+        if not session_path:
+            return account, False
+
+        bundle = self._session_store.load_bundle_path(session_path)
+        if not bundle:
+            return account, False
+
+        refresh_token = str(bundle.get("refresh_token", "") or "").strip()
+        if not refresh_token or not self._token_looks_like_jwt(refresh_token):
+            return account, False
+
+        if not self._session_bundle_requires_revalidation(bundle):
+            return account, False
+
+        try:
+            session = self._auth_gateway.login_with_refresh_token(refresh_token)
+        except Exception as exc:
+            self._append_activity(
+                "Saved session validation failed for %s: %s"
+                % (self._account_identity_label(account), str(exc).strip() or "Unknown error.")
+            )
+            return account, False
+
+        refreshed_bundle = self._stamp_session_bundle(dict(session.session_bundle))
+        self._session_store.save_bundle(account.profile_id, refreshed_bundle)
+        self._append_activity("Validated saved session bundle for %s." % self._account_identity_label(account))
+
+        next_steam_id = str(session.steam_id or "").strip()
+        next_account_name = str(session.account_name or "").strip()
+        if next_steam_id == account.steam_id and (not next_account_name or next_account_name == account.account_name):
+            return account, True
+
+        return (
+            replace(
+                account,
+                steam_id=next_steam_id or account.steam_id,
+                account_name=next_account_name or account.account_name,
+            ),
+            True,
+        )
+
+    def _session_bundle_requires_revalidation(self, bundle: Dict[str, Any]) -> bool:
+        if not self._bundle_has_web_credentials(bundle):
+            return True
+
+        validated_at = self._normalize_optional_string(bundle.get(SESSION_BUNDLE_VALIDATED_AT_KEY))
+        if not validated_at:
+            return True
+
+        try:
+            last_validated = datetime.fromisoformat(validated_at)
+        except ValueError:
+            return True
+
+        age_seconds = (datetime.now() - last_validated).total_seconds()
+        return age_seconds >= SESSION_BUNDLE_VALIDATION_INTERVAL_SECONDS
+
+    @staticmethod
+    def _stamp_session_bundle(bundle: Dict[str, Any]) -> Dict[str, Any]:
+        bundle[SESSION_BUNDLE_VALIDATED_AT_KEY] = datetime.now().isoformat(timespec="seconds")
+        return bundle
+
+    @staticmethod
+    def _bundle_has_web_credentials(bundle: Dict[str, Any]) -> bool:
+        return bool(
+            bundle.get("session_id")
+            and (
+                bundle.get("steam_login_secure")
+                or bundle.get("steamLoginSecure")
+                or bundle.get("access_token")
+            )
+        )
+
+    @staticmethod
+    def _token_looks_like_jwt(token: str) -> bool:
+        parts = str(token or "").split(".")
+        if len(parts) < 2:
+            return False
+        payload = parts[1]
+        padding = "=" * (-len(payload) % 4)
+        try:
+            decoded = base64.urlsafe_b64decode(payload + padding).decode("utf-8")
+            claims = json.loads(decoded)
+        except Exception:
+            return False
+        return bool(isinstance(claims, dict) and str(claims.get("sub", "")).strip())
 
     def _find_account_by_steam_id(self, steam_id: str) -> Optional[AccountProfile]:
         for account in self._config.accounts:

@@ -9,7 +9,7 @@ def test_config_store_returns_defaults_when_missing(tmp_path) -> None:
     config = store.load()
 
     assert isinstance(config, AppConfig)
-    assert config.last_page == "dashboard"
+    assert config.last_page == "overview"
     assert config.accounts == []
 
 

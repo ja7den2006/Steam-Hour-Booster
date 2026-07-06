@@ -76,6 +76,7 @@ class FakeAuthGateway:
             challenge_url="https://example.test/challenge",
         )
         self._poll_count = 0
+        self.refresh_login_calls = []
 
     def login_with_credentials(self, account_name: str, password: str, **kwargs):
         assert account_name == "primary_account"
@@ -84,17 +85,37 @@ class FakeAuthGateway:
             steam_id="7656119",
             account_name=account_name,
             refresh_token="refresh",
-            session_bundle={"steam_id": "7656119", "refresh_token": "refresh"},
+            session_bundle={
+                "steam_id": "7656119",
+                "refresh_token": "refresh",
+                "session_id": "session-1",
+                "steam_login_secure": "cookie-1",
+            },
             session_state={"logged_in": True},
         )
 
     def login_with_refresh_token(self, refresh_token: str):
-        assert refresh_token == "refresh-token"
+        self.refresh_login_calls.append(refresh_token)
+        if refresh_token == "refresh-token":
+            steam_id = "7656120"
+            account_name = "token_account"
+        else:
+            steam_id = json.loads(
+                base64.urlsafe_b64decode(
+                    refresh_token.split(".")[1] + ("=" * (-len(refresh_token.split(".")[1]) % 4))
+                ).decode("utf-8")
+            )["sub"]
+            account_name = "primary_account"
         return AuthSession(
-            steam_id="7656120",
-            account_name="token_account",
+            steam_id=str(steam_id),
+            account_name=account_name,
             refresh_token=refresh_token,
-            session_bundle={"steam_id": "7656120", "refresh_token": refresh_token},
+            session_bundle={
+                "steam_id": str(steam_id),
+                "refresh_token": refresh_token,
+                "session_id": "session-refresh",
+                "steam_login_secure": "cookie-refresh",
+            },
             session_state={"logged_in": True},
         )
 
@@ -110,7 +131,12 @@ class FakeAuthGateway:
             steam_id="7656121",
             account_name="qr_account",
             refresh_token="qr-refresh",
-            session_bundle={"steam_id": "7656121", "refresh_token": "qr-refresh"},
+            session_bundle={
+                "steam_id": "7656121",
+                "refresh_token": "qr-refresh",
+                "session_id": "session-qr",
+                "steam_login_secure": "cookie-qr",
+            },
             session_state={"logged_in": True},
         )
 
@@ -840,3 +866,41 @@ def test_runtime_poll_returns_current_state(tmp_path) -> None:
     assert result["ok"] is True
     assert result["status"] == "polled"
     assert result["state"]["runtime"]["counts"]["ready_accounts"] == 1
+
+
+def test_saved_jwt_session_bundle_is_revalidated_on_startup(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    gateway = FakeAuthGateway()
+    refresh_token = build_client_refresh_token("7656119")
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {"steam_id": "7656119", "refresh_token": refresh_token},
+    )
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                account_name="primary_account",
+                steam_id="7656119",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=gateway,
+        session_store=session_store,
+    )
+
+    del api
+    saved_bundle = session_store.load_bundle_path(str(bundle_path))
+
+    assert gateway.refresh_login_calls == [refresh_token]
+    assert saved_bundle["session_id"] == "session-refresh"
+    assert saved_bundle["steam_login_secure"] == "cookie-refresh"
+    assert "shb_session_validated_at" in saved_bundle

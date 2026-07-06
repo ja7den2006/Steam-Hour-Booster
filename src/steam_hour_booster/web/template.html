@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Steam Hour Booster</title>
+    <link rel="icon" href="__STEAM_ICON_SRC__">
     <style>
 __INLINE_STYLES__
     </style>
@@ -13,13 +14,7 @@ __INLINE_STYLES__
       <header class="topbar">
         <div class="topbar__drag pywebview-drag-region" id="drag-region">
           <div class="steam-mark" aria-hidden="true">
-            <svg viewBox="0 0 64 64" role="img" aria-label="Steam">
-              <circle cx="32" cy="32" r="30" fill="#111821"></circle>
-              <circle cx="43" cy="21" r="10" fill="none" stroke="#ffffff" stroke-width="5"></circle>
-              <circle cx="43" cy="21" r="4" fill="#ffffff"></circle>
-              <path d="M17 41.5 28.5 46a8 8 0 1 0 4.7-10.7L22.5 31" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
-              <circle cx="27" cy="44.5" r="3.4" fill="#ffffff"></circle>
-            </svg>
+            <img class="steam-mark__image" src="__STEAM_ICON_SRC__" alt="" draggable="false">
           </div>
           <div class="topbar__title">Steam Hour Booster</div>
         </div>
@@ -199,6 +194,7 @@ __INLINE_STYLES__
                 <div>
                   <div class="section-label">Profile Editor</div>
                   <h2 id="account-editor-title">Select an account</h2>
+                  <p class="card-subtitle" id="account-editor-subtitle">Select an account to edit its booster settings.</p>
                 </div>
                 <span class="pill pill--subtle" id="account-editor-slot-pill">0 games</span>
               </div>
@@ -247,7 +243,7 @@ __INLINE_STYLES__
 
                 <div class="form-grid">
                   <label class="field">
-                    <span>Username</span>
+                    <span id="editor-account-name-label">Username</span>
                     <input id="editor-account-name" type="text" readonly>
                   </label>
                   <label class="field">
@@ -316,30 +312,26 @@ __INLINE_STYLES__
                     <span class="pill pill--subtle" id="editor-games-count-pill">0 games</span>
                   </div>
 
-                  <div class="form-grid">
-                    <label class="field field--wide">
-                      <span>Popular preset</span>
-                      <select id="editor-preset-game"></select>
-                    </label>
-                  </div>
+                  <div class="editor-game-builder">
+                    <div class="editor-game-row editor-game-row--preset">
+                      <label class="field field--grow">
+                        <span>Popular preset</span>
+                        <select id="editor-preset-game"></select>
+                      </label>
+                      <button class="secondary-button editor-game-builder__button" id="editor-add-preset-button">Add preset</button>
+                    </div>
 
-                  <div class="form-actions">
-                    <button class="secondary-button" id="editor-add-preset-button">Add preset</button>
-                  </div>
-
-                  <div class="form-grid">
-                    <label class="field">
-                      <span>Custom App ID</span>
-                      <input id="editor-custom-app-id" type="text" inputmode="numeric" placeholder="730">
-                    </label>
-                    <label class="field">
-                      <span>Game name</span>
-                      <input id="editor-custom-game-title" type="text" placeholder="Counter-Strike 2">
-                    </label>
-                  </div>
-
-                  <div class="form-actions">
-                    <button class="action-button" id="editor-add-custom-game-button">Add game</button>
+                    <div class="editor-game-row editor-game-row--custom">
+                      <label class="field">
+                        <span>Custom App ID</span>
+                        <input id="editor-custom-app-id" type="text" inputmode="numeric" placeholder="730">
+                      </label>
+                      <label class="field">
+                        <span>Game name</span>
+                        <input id="editor-custom-game-title" type="text" placeholder="Counter-Strike 2">
+                      </label>
+                      <button class="action-button editor-game-builder__button" id="editor-add-custom-game-button">Add game</button>
+                    </div>
                   </div>
 
                   <div class="game-slot-empty" id="editor-games-empty">

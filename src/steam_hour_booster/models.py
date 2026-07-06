@@ -115,7 +115,7 @@ class AppConfig:
     window_height: int = 920
     window_x: Optional[int] = None
     window_y: Optional[int] = None
-    last_page: str = "dashboard"
+    last_page: str = "overview"
     accounts: List[AccountProfile] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -137,6 +137,6 @@ class AppConfig:
             window_height=int(payload.get("window_height", 920)),
             window_x=payload.get("window_x"),
             window_y=payload.get("window_y"),
-            last_page=str(payload.get("last_page", "dashboard")),
+            last_page=str(payload.get("last_page", "overview")),
             accounts=[AccountProfile.from_dict(item) for item in payload.get("accounts", [])],
         )
