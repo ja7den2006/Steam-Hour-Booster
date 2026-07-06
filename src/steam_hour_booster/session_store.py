@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -33,10 +34,20 @@ class SessionStore:
         )
         return path
 
+    def save_client_auth_cache(self, profile_id: str, payload: Dict[str, object]) -> Path:
+        cache_path = self.client_auth_cache_path(profile_id)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return cache_path
+
     def delete_bundle(self, profile_id: str) -> None:
         path = self.bundle_path(profile_id)
         if path.exists():
             path.unlink()
+        self.delete_client_credentials(profile_id)
 
     @staticmethod
     def load_bundle_path(path: str) -> Optional[Dict[str, object]]:
@@ -81,3 +92,8 @@ class SessionStore:
         resolved = Path(path)
         if resolved.exists():
             resolved.unlink()
+
+    def delete_client_credentials(self, profile_id: str) -> None:
+        credential_dir = self.client_credentials_dir(profile_id)
+        if credential_dir.exists():
+            shutil.rmtree(credential_dir, ignore_errors=True)

@@ -196,6 +196,90 @@ def test_live_runtime_marks_web_only_bundle_as_needing_auth_instead_of_error(tmp
     assert started.state == RuntimeState.NEEDS_AUTH
 
 
+def test_live_runtime_starts_with_cached_login_key_when_bundle_is_web_only(tmp_path) -> None:
+    steam_id = "76561197960287930"
+    created_clients = []
+
+    class LoginKeyOnlyClient:
+        def __init__(self):
+            self.connected = False
+            self.logged_on = False
+            self.login_key = ""
+            self.login_key_attempted = None
+            self.refresh_attempted = False
+            self.played_calls = []
+            created_clients.append(self)
+
+        def set_credential_location(self, path):
+            self.credential_location = path
+
+        def login(self, username, password="", login_key=None, **kwargs):
+            del password, kwargs
+            self.connected = True
+            self.logged_on = True
+            self.account_name = username
+            self.login_key_attempted = login_key
+            self.login_key = login_key or ""
+            return EResult.OK if login_key == "persisted-login-key" else EResult.Fail
+
+        def login_with_refresh_token(self, refresh_token, steam_id, account_name=""):
+            del refresh_token, steam_id, account_name
+            self.refresh_attempted = True
+            return EResult.AccessDenied
+
+        def change_status(self, **kwargs):
+            return None
+
+        def games_played(self, app_ids):
+            self.played_calls.append(list(app_ids))
+
+        def sleep(self, seconds):
+            time.sleep(0.01)
+
+        def logout(self):
+            self.logged_on = False
+            self.connected = False
+
+        def disconnect(self):
+            self.connected = False
+
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {"steam_id": steam_id, "refresh_token": build_web_refresh_token(steam_id)},
+    )
+    session_store.save_client_auth_cache(
+        "steam_7656119",
+        {
+            "account_name": "primary_account",
+            "steam_id": steam_id,
+            "login_key": "persisted-login-key",
+        },
+    )
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        account_name="primary_account",
+        steam_id=steam_id,
+        session_bundle_path=str(bundle_path),
+        games=[IdleGame(app_id=730)],
+    )
+    runtime = SteamNetworkBoosterRuntime(
+        session_store=session_store,
+        client_factory=LoginKeyOnlyClient,
+        start_timeout=2.0,
+        sleep_interval=0.01,
+    )
+
+    started = runtime.start(account, session_store.load_bundle_path(str(bundle_path)))
+    runtime.stop("steam_7656119")
+
+    assert started.active_app_ids == [730]
+    assert len(created_clients) == 1
+    assert created_clients[0].login_key_attempted == "persisted-login-key"
+    assert created_clients[0].refresh_attempted is False
+
+
 def test_runtime_controller_keeps_disabled_accounts_idle(tmp_path) -> None:
     session_store = SessionStore(base_dir=tmp_path / "sessions")
     bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})

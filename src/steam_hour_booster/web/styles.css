@@ -737,6 +737,7 @@ select {
 }
 
 .editor-shell--hidden,
+.editor-client-auth-card--hidden,
 .editor-empty--hidden,
 .game-slot-empty--hidden,
 .editor-auto-reply-fields--disabled {

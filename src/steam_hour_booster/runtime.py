@@ -1202,8 +1202,6 @@ class SteamNetworkBoosterRuntime:
             raise RuntimeError("Saved session bundle does not contain a Steam refresh token.")
         if not steam_id:
             raise RuntimeError("Saved session bundle does not include a SteamID.")
-        if not _refresh_token_is_client_usable(refresh_token):
-            raise RuntimeError("The saved refresh token is not valid for Steam client logon.")
 
         return _LiveWorkerConfig(
             profile_id=account.profile_id,

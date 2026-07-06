@@ -17,6 +17,11 @@ from steamcommunitykit.exceptions import (
     SteamResponseError,
     SteamValidationError,
 )
+from steam_hour_booster.auth.client import (
+    SteamClientAuthError,
+    SteamClientAuthGateway,
+    SteamClientGuardRequiredError,
+)
 from steam_hour_booster.auth.community import AuthSession, PendingQRLogin, SteamCommunityAuthGateway
 from steam_hour_booster.config_store import ConfigStore
 from steam_hour_booster.models import (
@@ -85,14 +90,18 @@ class DesktopApi:
         config_store: ConfigStore,
         config: AppConfig,
         auth_gateway: Optional[SteamCommunityAuthGateway] = None,
+        client_auth_gateway: Optional[SteamClientAuthGateway] = None,
         session_store: Optional[SessionStore] = None,
         runtime_controller: Optional[RuntimeController] = None,
         path_opener: Optional[Callable[[Path], None]] = None,
     ) -> None:
         self._config_store = config_store
         self._config = config
-        self._auth_gateway = auth_gateway or SteamCommunityAuthGateway()
         self._session_store = session_store or SessionStore()
+        self._auth_gateway = auth_gateway or SteamCommunityAuthGateway()
+        self._client_auth_gateway = client_auth_gateway or SteamClientAuthGateway(
+            session_store=self._session_store
+        )
         self._runtime_controller = runtime_controller or RuntimeController(
             session_store=self._session_store
         )
@@ -169,6 +178,7 @@ class DesktopApi:
         account_name = self._normalize_required_string(values.get("account_name"), "account name")
         password = self._normalize_required_string(values.get("password"), "password")
         steam_guard_code = self._normalize_optional_string(values.get("steam_guard_code")) or None
+        steam_guard_code_kind = self._normalize_optional_string(values.get("steam_guard_code_kind")) or None
 
         try:
             session = self._auth_gateway.login_with_credentials(
@@ -178,12 +188,20 @@ class DesktopApi:
                 steam_guard_code=steam_guard_code,
                 prompt_for_steam_guard=False,
             )
+            self._authorize_client_session(
+                profile_id=self._session_store.build_profile_id(session.steam_id),
+                account_name=account_name,
+                steam_id=str(session.steam_id),
+                password=password,
+                steam_guard_code=steam_guard_code or "",
+                steam_guard_code_kind=steam_guard_code_kind or "",
+            )
             self._append_activity("Credential sign-in completed for %s." % account_name)
             return self._upsert_authenticated_account(
                 session=session,
                 display_name=display_name or account_name,
                 login_mode="credentials",
-                success_message="Credential login completed and session bundle saved.",
+                success_message="Credential login completed and booster authorization is ready.",
             )
         except SteamAuthenticationError as exc:
             steam_guard_result = self._steam_guard_required_result(exc)
@@ -192,6 +210,15 @@ class DesktopApi:
                 return steam_guard_result
             self._append_activity(
                 "Credential sign-in failed for %s: %s"
+                % (account_name, str(exc).strip() or "Unknown error.")
+            )
+            return self._error_result(exc)
+        except SteamClientGuardRequiredError as exc:
+            self._append_activity("Steam client authorization needs a guard code for %s." % account_name)
+            return self._client_guard_required_result(exc)
+        except SteamClientAuthError as exc:
+            self._append_activity(
+                "Steam client authorization failed for %s: %s"
                 % (account_name, str(exc).strip() or "Unknown error.")
             )
             return self._error_result(exc)
@@ -326,6 +353,7 @@ class DesktopApi:
                 SessionStore.delete_bundle_path(account.session_bundle_path)
             else:
                 self._session_store.delete_bundle(account.profile_id)
+            self._session_store.delete_client_credentials(account.profile_id)
             self._config.accounts.pop(index)
             self._append_activity("Removed account %s." % self._account_identity_label(account))
             self._persist()
@@ -524,11 +552,68 @@ class DesktopApi:
         return result
 
     def refresh_runtime_state(self) -> Dict[str, Any]:
+        self._revalidate_saved_session_bundles()
         self._sync_runtime_profiles(reason="manual refresh")
         return {
             "ok": True,
             "status": "refreshed",
             "message": "Runtime readiness refreshed.",
+            "state": self.get_bootstrap_state(),
+        }
+
+    def authorize_account_client(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        values = payload or {}
+        profile_id = self._normalize_required_string(values.get("profile_id"), "profile id")
+        password = self._normalize_required_string(values.get("password"), "password")
+        steam_guard_code = self._normalize_optional_string(values.get("steam_guard_code"))
+        steam_guard_code_kind = self._normalize_optional_string(values.get("steam_guard_code_kind"))
+
+        account = self._find_account_by_profile_id(profile_id)
+        if account is None:
+            return self._message_result(
+                ok=False,
+                status="not_found",
+                message="That account profile was not found.",
+            )
+        if not account.account_name:
+            return self._message_result(
+                ok=False,
+                status="invalid",
+                message="This account does not have a saved username for Steam client authorization.",
+            )
+
+        try:
+            self._authorize_client_session(
+                profile_id=account.profile_id,
+                account_name=account.account_name,
+                steam_id=account.steam_id,
+                password=password,
+                steam_guard_code=steam_guard_code,
+                steam_guard_code_kind=steam_guard_code_kind,
+            )
+        except SteamClientGuardRequiredError as exc:
+            self._append_activity(
+                "Steam client authorization needs a guard code for %s."
+                % self._account_identity_label(account)
+            )
+            return self._client_guard_required_result(exc)
+        except Exception as exc:
+            self._append_activity(
+                "Steam client authorization failed for %s: %s"
+                % (self._account_identity_label(account), str(exc).strip() or "Unknown error.")
+            )
+            return self._error_result(exc)
+
+        self._append_activity(
+            "Steam client authorization prepared for %s."
+            % self._account_identity_label(account)
+        )
+        self._sync_runtime_profiles(reason="client authorization")
+        return {
+            "ok": True,
+            "status": "authorized",
+            "message": "Steam client authorization is ready for %s." % self._account_identity_label(account),
+            "account": self._serialize_account(account),
             "state": self.get_bootstrap_state(),
         }
 
@@ -541,6 +626,7 @@ class DesktopApi:
 
     def start_account_runtime(self, profile_id: str) -> Dict[str, Any]:
         resolved_profile_id = self._normalize_required_string(profile_id, "profile id")
+        self._revalidate_saved_session_bundles()
         try:
             status = self._runtime_controller.start_profile(
                 resolved_profile_id,
@@ -584,6 +670,7 @@ class DesktopApi:
         }
 
     def start_all_runtime(self) -> Dict[str, Any]:
+        self._revalidate_saved_session_bundles()
         summary = self._runtime_controller.start_all(self._config.accounts)
         return {
             "ok": True,
@@ -848,6 +935,25 @@ class DesktopApi:
             "state": self.get_bootstrap_state(),
         }
 
+    def _authorize_client_session(
+        self,
+        *,
+        profile_id: str,
+        account_name: str,
+        steam_id: str,
+        password: str,
+        steam_guard_code: str = "",
+        steam_guard_code_kind: str = "",
+    ) -> None:
+        self._client_auth_gateway.authorize_credentials(
+            profile_id=profile_id,
+            account_name=account_name,
+            steam_id=steam_id,
+            password=password,
+            steam_guard_code=steam_guard_code,
+            steam_guard_code_kind=steam_guard_code_kind,
+        )
+
     def _revalidate_saved_session_bundles(self) -> None:
         if not self._config.accounts:
             return
@@ -1020,6 +1126,19 @@ class DesktopApi:
             "code_label": self._steam_guard_code_label(code_kind),
             "code_placeholder": self._steam_guard_code_placeholder(code_kind, associated_message),
             "associated_message": associated_message,
+        }
+
+    def _client_guard_required_result(self, exc: SteamClientGuardRequiredError) -> Dict[str, Any]:
+        code_kind = str(exc.code_kind or "generic").strip().lower() or "generic"
+        return {
+            "ok": False,
+            "status": "steam_guard_required",
+            "message": str(exc).strip() or "A Steam Guard code is required for Steam client authorization.",
+            "error_type": exc.__class__.__name__,
+            "code_kind": code_kind,
+            "code_label": self._steam_guard_code_label(code_kind),
+            "code_placeholder": self._steam_guard_code_placeholder(code_kind, ""),
+            "associated_message": "",
         }
 
     @staticmethod

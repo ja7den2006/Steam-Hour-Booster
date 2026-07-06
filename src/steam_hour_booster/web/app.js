@@ -36,6 +36,7 @@ const shellState = {
   bootstrap: fallbackState,
   authMode: 'credentials',
   credentialGuardRequirement: null,
+  clientAuthorizeRequirement: null,
   pendingCredentialLogin: null,
   selectedAccountProfileId: null,
   editorGames: [],
@@ -254,6 +255,7 @@ async function loginWithCredentials() {
   const result = await callApi('login_account_with_credentials', {
     account_name: accountName,
     password,
+    steam_guard_code_kind: shellState.credentialGuardRequirement?.code_kind || '',
   });
 
   if (result?.status === 'steam_guard_required') {
@@ -293,6 +295,7 @@ async function submitGuardCode() {
     account_name: shellState.pendingCredentialLogin.accountName,
     password: shellState.pendingCredentialLogin.password,
     steam_guard_code: guardCode,
+    steam_guard_code_kind: shellState.credentialGuardRequirement?.code_kind || '',
   });
 
   if (result?.status === 'steam_guard_required') {
@@ -645,6 +648,11 @@ function bindEditorDraftInputs() {
     element.addEventListener('input', markEditorDirty);
     element.addEventListener('change', markEditorDirty);
   });
+
+  const authorizeButton = document.getElementById('editor-client-authorize-button');
+  if (authorizeButton) {
+    authorizeButton.addEventListener('click', authorizeSelectedAccountClient);
+  }
 }
 
 function fillOverview() {
@@ -799,6 +807,7 @@ function fillAccountEditor() {
   hydratePopularGameOptions();
 
   if (!profile) {
+    shellState.clientAuthorizeRequirement = null;
     resetEditorDraftState(null);
     if (editorShell) {
       editorShell.classList.add('editor-shell--hidden');
@@ -817,6 +826,7 @@ function fillAccountEditor() {
     setText('editor-library-status', 'Pending');
     setText('editor-runtime-message', 'No booster message yet.');
     setText('editor-library-message', 'Library validation details will appear here.');
+    fillClientAuthPanel(null, null);
     return;
   }
 
@@ -833,6 +843,7 @@ function fillAccountEditor() {
     updatePresenceEditorState();
     updateAutoReplyEditorState();
     fillEditorHealth(profile, runtimeStatus);
+    fillClientAuthPanel(profile, runtimeStatus);
     return;
   }
 
@@ -867,6 +878,7 @@ function fillAccountEditor() {
   updatePresenceEditorState();
   updateAutoReplyEditorState();
   fillEditorHealth(profile, runtimeStatus);
+  fillClientAuthPanel(profile, runtimeStatus);
 }
 
 function setEditorIdentity(profile) {
@@ -915,6 +927,88 @@ function fillEditorHealth(profile, status) {
   setText('editor-library-status', formatOwnedGamesValidationState(status?.owned_games_validation_state));
   setText('editor-runtime-message', status?.message || 'No booster message yet.');
   setText('editor-library-message', formatOwnedGamesValidationDetail(status));
+}
+
+function fillClientAuthPanel(profile, status) {
+  const card = document.getElementById('editor-client-auth-card');
+  if (!card) {
+    return;
+  }
+
+  const needsAuthorization = Boolean(
+    profile
+      && status?.session_ready
+      && !status?.runtime_ready,
+  );
+  card.classList.toggle('editor-client-auth-card--hidden', !needsAuthorization);
+
+  if (!needsAuthorization) {
+    shellState.clientAuthorizeRequirement = null;
+    setText('editor-client-auth-copy', 'This account needs Steam client authorization before it can boost.');
+    setText('editor-client-guard-label', 'Steam Guard Code');
+    setInputValue('editor-client-password', '');
+    setInputValue('editor-client-guard-code', '');
+    setButtonBusy('editor-client-authorize-button', false, 'Authorize Booster');
+    return;
+  }
+
+  const requirement = shellState.clientAuthorizeRequirement;
+  setText(
+    'editor-client-auth-copy',
+    requirement?.message
+      || status?.runtime_auth_message
+      || 'This account needs Steam client authorization before it can boost.',
+  );
+  setText('editor-client-guard-label', requirement?.code_label || 'Steam Guard Code');
+
+  const guardInput = document.getElementById('editor-client-guard-code');
+  if (guardInput) {
+    guardInput.placeholder = requirement?.code_placeholder || 'Only required if Steam asks for it';
+  }
+}
+
+async function authorizeSelectedAccountClient() {
+  const profile = getSelectedAccount();
+  if (!profile) {
+    return;
+  }
+
+  const password = getValue('editor-client-password');
+  const guardCode = getValue('editor-client-guard-code').trim();
+  if (!password) {
+    setEditorStatus('error', 'Password is required to finish Steam client authorization.');
+    return;
+  }
+
+  setButtonBusy('editor-client-authorize-button', true, 'Authorizing...');
+  setEditorStatus('info', 'Preparing Steam client authorization.');
+
+  const result = await callApi('authorize_account_client', {
+    profile_id: profile.profile_id,
+    password,
+    steam_guard_code: guardCode,
+    steam_guard_code_kind: shellState.clientAuthorizeRequirement?.code_kind || '',
+  });
+
+  if (result?.status === 'steam_guard_required') {
+    shellState.clientAuthorizeRequirement = result;
+    fillClientAuthPanel(profile, getSelectedRuntimeStatus());
+    setEditorStatus('info', result.message || 'Steam Guard code required for booster authorization.');
+    setButtonBusy('editor-client-authorize-button', false, 'Authorize Booster');
+    return;
+  }
+
+  if (result?.ok) {
+    shellState.clientAuthorizeRequirement = null;
+  }
+
+  await handleMutationResult(result, {
+    target: 'editor',
+    successMessage: result?.message || 'Steam client authorization completed.',
+    clearIds: result?.ok ? ['editor-client-password', 'editor-client-guard-code'] : [],
+    selectProfileId: profile.profile_id,
+  });
+  setButtonBusy('editor-client-authorize-button', false, 'Authorize Booster');
 }
 
 function hydratePersonaOptions() {

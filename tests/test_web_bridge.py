@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from steamcommunitykit.exceptions import SteamAuthenticationError
+from steam_hour_booster.auth.client import SteamClientGuardRequiredError
 from steam_hour_booster.auth.community import AuthSession
 from steam_hour_booster.config_store import ConfigStore
 from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
@@ -160,6 +161,61 @@ class SteamGuardRequiredAuthGateway(FakeAuthGateway):
         )
 
 
+class FakeClientAuthGateway:
+    def __init__(self, session_store: SessionStore) -> None:
+        self.calls = []
+        self.session_store = session_store
+
+    def authorize_credentials(
+        self,
+        *,
+        profile_id: str,
+        account_name: str,
+        steam_id: str,
+        password: str,
+        steam_guard_code: str = "",
+        steam_guard_code_kind: str = "",
+    ):
+        self.calls.append(
+            {
+                "profile_id": profile_id,
+                "account_name": account_name,
+                "steam_id": steam_id,
+                "password": password,
+                "steam_guard_code": steam_guard_code,
+                "steam_guard_code_kind": steam_guard_code_kind,
+            }
+        )
+        cache_path = self.session_store.save_client_auth_cache(
+            profile_id,
+            {
+                "account_name": account_name,
+                "steam_id": steam_id,
+                "login_key": "persisted-login-key",
+                "updated_at": "2026-07-06T12:00:00",
+            },
+        )
+        return {"cache_path": str(cache_path)}
+
+
+class GuardedClientAuthGateway(FakeClientAuthGateway):
+    def authorize_credentials(
+        self,
+        *,
+        profile_id: str,
+        account_name: str,
+        steam_id: str,
+        password: str,
+        steam_guard_code: str = "",
+        steam_guard_code_kind: str = "",
+    ):
+        del profile_id, account_name, steam_id, password, steam_guard_code, steam_guard_code_kind
+        raise SteamClientGuardRequiredError(
+            code_kind="app",
+            message="A Steam Guard app code is required for Steam client authorization.",
+        )
+
+
 class RecordingPathOpener:
     def __init__(self) -> None:
         self.paths = []
@@ -227,10 +283,12 @@ def test_window_actions_call_host_methods(tmp_path) -> None:
 def test_credential_login_creates_account_and_bundle(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     session_store = SessionStore(base_dir=tmp_path / "sessions")
+    client_auth_gateway = FakeClientAuthGateway(session_store)
     api = DesktopApi(
         config_store=store,
         config=AppConfig(),
         auth_gateway=FakeAuthGateway(),
+        client_auth_gateway=client_auth_gateway,
         session_store=session_store,
     )
 
@@ -245,6 +303,9 @@ def test_credential_login_creates_account_and_bundle(tmp_path) -> None:
     assert result["ok"] is True
     assert result["account"]["steam_id"] == "7656119"
     assert Path(result["account"]["session_bundle_path"]).exists()
+    assert session_store.client_auth_cache_path("steam_7656119").exists() is True
+    assert client_auth_gateway.calls[0]["account_name"] == "primary_account"
+    assert result["state"]["runtime"]["statuses"][0]["runtime_ready"] is True
     assert store.load().accounts[0].display_name == "Primary"
     assert any("Credential sign-in completed" in line for line in result["state"]["activity_log"])
 
@@ -299,10 +360,86 @@ def test_qr_flow_polls_then_creates_account(tmp_path) -> None:
     assert any("QR sign-in approved." in line for line in approved["state"]["activity_log"])
 
 
+def test_authorize_account_client_upgrades_saved_web_session_for_runtime(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    gateway = FakeAuthGateway()
+    client_auth_gateway = FakeClientAuthGateway(session_store)
+    api = DesktopApi(
+        config_store=store,
+        config=AppConfig(),
+        auth_gateway=gateway,
+        client_auth_gateway=client_auth_gateway,
+        session_store=session_store,
+    )
+
+    started = api.begin_qr_account_login({"display_name": "QR Account"})
+    api.poll_qr_account_login(started["pending_id"])
+    approved = api.poll_qr_account_login(started["pending_id"])
+    profile_id = approved["account"]["profile_id"]
+
+    runtime_before = approved["state"]["runtime"]["statuses"][0]
+    authorized = api.authorize_account_client(
+        {
+            "profile_id": profile_id,
+            "password": "password123",
+        }
+    )
+
+    runtime_after = authorized["state"]["runtime"]["statuses"][0]
+
+    assert runtime_before["session_ready"] is True
+    assert runtime_before["runtime_ready"] is False
+    assert authorized["ok"] is True
+    assert authorized["status"] == "authorized"
+    assert runtime_after["runtime_ready"] is True
+    assert session_store.client_auth_cache_path(profile_id).exists() is True
+    assert client_auth_gateway.calls[0]["profile_id"] == profile_id
+
+
+def test_authorize_account_client_returns_structured_guard_requirement(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    gateway = FakeAuthGateway()
+    client_auth_gateway = GuardedClientAuthGateway(session_store)
+    api = DesktopApi(
+        config_store=store,
+        config=AppConfig(),
+        auth_gateway=gateway,
+        client_auth_gateway=client_auth_gateway,
+        session_store=session_store,
+    )
+
+    started = api.begin_qr_account_login({"display_name": "QR Account"})
+    api.poll_qr_account_login(started["pending_id"])
+    approved = api.poll_qr_account_login(started["pending_id"])
+    profile_id = approved["account"]["profile_id"]
+
+    result = api.authorize_account_client(
+        {
+            "profile_id": profile_id,
+            "password": "password123",
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "steam_guard_required"
+    assert result["code_kind"] == "app"
+    assert result["code_label"] == "Steam Guard App Code"
+
+
 def test_remove_account_deletes_bundle(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     session_store = SessionStore(base_dir=tmp_path / "sessions")
     bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119"})
+    client_cache_path = session_store.save_client_auth_cache(
+        "steam_7656119",
+        {
+            "account_name": "primary_account",
+            "steam_id": "7656119",
+            "login_key": "persisted-login-key",
+        },
+    )
     config = AppConfig(
         accounts=[
             AccountProfile(
@@ -324,6 +461,7 @@ def test_remove_account_deletes_bundle(tmp_path) -> None:
 
     assert result["ok"] is True
     assert bundle_path.exists() is False
+    assert client_cache_path.exists() is False
     assert store.load().accounts == []
 
 
