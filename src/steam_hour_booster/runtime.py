@@ -381,6 +381,18 @@ def _refresh_token_is_client_usable(refresh_token: str) -> bool:
     return issuer == "steam" and "client" in audiences
 
 
+def _runtime_refresh_token_from_bundle(session_bundle: Dict[str, object]) -> str:
+    client_refresh_token = str(session_bundle.get("client_refresh_token", "") or "").strip()
+    if client_refresh_token and _refresh_token_is_client_usable(client_refresh_token):
+        return client_refresh_token
+
+    refresh_token = str(session_bundle.get("refresh_token", "") or "").strip()
+    if refresh_token and _refresh_token_is_client_usable(refresh_token):
+        return refresh_token
+
+    return ""
+
+
 if ValvePythonSteamClient is not None:
     class RefreshTokenSteamClient(ValvePythonSteamClient):
         def login_with_refresh_token(
@@ -416,9 +428,6 @@ if ValvePythonSteamClient is not None:
                 message.body.obfuscated_private_ip.v4 = ip4_to_int(self.connection.local_address) ^ 0xF00DBAAD
             else:
                 message.body.obfuscated_private_ip.v4 = int(login_id)
-
-            if account_name:
-                message.body.account_name = str(account_name)
 
             sentry = self.get_sentry(self.username)
             if sentry is None:
@@ -719,6 +728,10 @@ class _LiveBoostWorker:
             errors.append("login-key logon failed: %s." % getattr(result, "name", result))
             self._clear_cached_login_key()
             self._safe_disconnect_client(login_key_client)
+
+        if not config.refresh_token:
+            errors.append("no Steam client refresh token is available.")
+            return _LoginAttemptResult(None, error_message=" ".join(errors).strip())
 
         refresh_client = self._client_factory()
         self._attach_client_hooks(refresh_client)
@@ -1196,10 +1209,8 @@ class SteamNetworkBoosterRuntime:
 
     @staticmethod
     def _build_worker_config(account: AccountProfile, session_bundle: Dict[str, object]) -> _LiveWorkerConfig:
-        refresh_token = str(session_bundle.get("refresh_token", "") or "").strip()
+        refresh_token = _runtime_refresh_token_from_bundle(session_bundle)
         steam_id = str(session_bundle.get("steam_id", "") or account.steam_id or "").strip()
-        if not refresh_token:
-            raise RuntimeError("Saved session bundle does not contain a Steam refresh token.")
         if not steam_id:
             raise RuntimeError("Saved session bundle does not include a SteamID.")
 
@@ -1649,8 +1660,7 @@ class RuntimeController:
         if self._transport.preview_mode:
             return True
 
-        refresh_token = str(bundle.get("refresh_token", "") or "").strip()
-        if refresh_token and _refresh_token_is_client_usable(refresh_token):
+        if _runtime_refresh_token_from_bundle(bundle):
             return True
 
         return self._has_cached_login_key(account)
@@ -1665,6 +1675,10 @@ class RuntimeController:
 
         if self._has_cached_login_key(account):
             return "Saved Steam client login key is ready."
+
+        client_refresh_token = str(bundle.get("client_refresh_token", "") or "").strip()
+        if client_refresh_token and _refresh_token_is_client_usable(client_refresh_token):
+            return "Saved Steam client refresh token is ready."
 
         refresh_token = str(bundle.get("refresh_token", "") or "").strip()
         if refresh_token and _refresh_token_is_client_usable(refresh_token):

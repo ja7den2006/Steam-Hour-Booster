@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from steamcommunitykit.exceptions import SteamAuthenticationError
-from steam_hour_booster.auth.client import SteamClientGuardRequiredError
+from steam_hour_booster.auth.client import ClientAuthResult, SteamClientGuardRequiredError
 from steam_hour_booster.auth.community import AuthSession
 from steam_hour_booster.config_store import ConfigStore
 from steam_hour_booster.models import AccountProfile, AppConfig, IdleGame
@@ -17,6 +17,14 @@ def build_client_refresh_token(steam_id: str) -> str:
     header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode("utf-8")).decode("ascii").rstrip("=")
     payload = base64.urlsafe_b64encode(
         json.dumps({"iss": "steam", "aud": ["client"], "sub": steam_id}).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return "%s.%s.signature" % (header, payload)
+
+
+def build_web_refresh_token(steam_id: str) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode("utf-8")).decode("ascii").rstrip("=")
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"iss": "steam", "aud": ["web", "renew", "derive"], "sub": steam_id}).encode("utf-8")
     ).decode("ascii").rstrip("=")
     return "%s.%s.signature" % (header, payload)
 
@@ -186,16 +194,23 @@ class FakeClientAuthGateway:
                 "steam_guard_code_kind": steam_guard_code_kind,
             }
         )
+        client_refresh_token = build_client_refresh_token(steam_id)
         cache_path = self.session_store.save_client_auth_cache(
             profile_id,
             {
                 "account_name": account_name,
                 "steam_id": steam_id,
-                "login_key": "persisted-login-key",
+                "client_refresh_token": client_refresh_token,
                 "updated_at": "2026-07-06T12:00:00",
             },
         )
-        return {"cache_path": str(cache_path)}
+        return ClientAuthResult(
+            account_name=account_name,
+            steam_id=steam_id,
+            refresh_token=client_refresh_token,
+            cache_path=str(cache_path),
+            token_expires_at=1999999999,
+        )
 
 
 class GuardedClientAuthGateway(FakeClientAuthGateway):
@@ -304,6 +319,8 @@ def test_credential_login_creates_account_and_bundle(tmp_path) -> None:
     assert result["account"]["steam_id"] == "7656119"
     assert Path(result["account"]["session_bundle_path"]).exists()
     assert session_store.client_auth_cache_path("steam_7656119").exists() is True
+    saved_bundle = session_store.load_bundle_path(result["account"]["session_bundle_path"])
+    assert saved_bundle["client_refresh_token"] == build_client_refresh_token("7656119")
     assert client_auth_gateway.calls[0]["account_name"] == "primary_account"
     assert result["state"]["runtime"]["statuses"][0]["runtime_ready"] is True
     assert store.load().accounts[0].display_name == "Primary"
@@ -394,6 +411,9 @@ def test_authorize_account_client_upgrades_saved_web_session_for_runtime(tmp_pat
     assert authorized["status"] == "authorized"
     assert runtime_after["runtime_ready"] is True
     assert session_store.client_auth_cache_path(profile_id).exists() is True
+    saved_bundle = session_store.load_bundle_path(authorized["account"]["session_bundle_path"])
+    assert saved_bundle["refresh_token"] == "qr-refresh"
+    assert saved_bundle["client_refresh_token"] == build_client_refresh_token("7656121")
     assert client_auth_gateway.calls[0]["profile_id"] == profile_id
 
 
@@ -1010,10 +1030,15 @@ def test_saved_jwt_session_bundle_is_revalidated_on_startup(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     session_store = SessionStore(base_dir=tmp_path / "sessions")
     gateway = FakeAuthGateway()
-    refresh_token = build_client_refresh_token("7656119")
+    refresh_token = build_web_refresh_token("7656119")
+    client_refresh_token = build_client_refresh_token("7656119")
     bundle_path = session_store.save_bundle(
         "steam_7656119",
-        {"steam_id": "7656119", "refresh_token": refresh_token},
+        {
+            "steam_id": "7656119",
+            "refresh_token": refresh_token,
+            "client_refresh_token": client_refresh_token,
+        },
     )
     config = AppConfig(
         accounts=[
@@ -1041,4 +1066,5 @@ def test_saved_jwt_session_bundle_is_revalidated_on_startup(tmp_path) -> None:
     assert gateway.refresh_login_calls == [refresh_token]
     assert saved_bundle["session_id"] == "session-refresh"
     assert saved_bundle["steam_login_secure"] == "cookie-refresh"
+    assert saved_bundle["client_refresh_token"] == client_refresh_token
     assert "shb_session_validated_at" in saved_bundle

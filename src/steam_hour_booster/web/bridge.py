@@ -82,6 +82,16 @@ POPULAR_GAMES = [
 
 SESSION_BUNDLE_VALIDATED_AT_KEY = "shb_session_validated_at"
 SESSION_BUNDLE_VALIDATION_INTERVAL_SECONDS = 6 * 60 * 60
+CLIENT_REFRESH_TOKEN_KEY = "client_refresh_token"
+CLIENT_REFRESH_TOKEN_UPDATED_AT_KEY = "client_refresh_token_updated_at"
+CLIENT_REFRESH_TOKEN_EXPIRES_AT_KEY = "client_refresh_token_expires_at"
+CLIENT_REFRESH_TOKEN_SOURCE_KEY = "client_refresh_token_source"
+CLIENT_REFRESH_BUNDLE_KEYS = (
+    CLIENT_REFRESH_TOKEN_KEY,
+    CLIENT_REFRESH_TOKEN_UPDATED_AT_KEY,
+    CLIENT_REFRESH_TOKEN_EXPIRES_AT_KEY,
+    CLIENT_REFRESH_TOKEN_SOURCE_KEY,
+)
 
 
 def _console_log_finish_booster(message: str) -> None:
@@ -194,7 +204,7 @@ class DesktopApi:
                 steam_guard_code=steam_guard_code,
                 prompt_for_steam_guard=False,
             )
-            self._authorize_client_session(
+            auth_result = self._authorize_client_session(
                 profile_id=self._session_store.build_profile_id(session.steam_id),
                 account_name=account_name,
                 steam_id=str(session.steam_id),
@@ -203,12 +213,21 @@ class DesktopApi:
                 steam_guard_code_kind=steam_guard_code_kind or "",
             )
             self._append_activity("Credential sign-in completed for %s." % account_name)
-            return self._upsert_authenticated_account(
+            result = self._upsert_authenticated_account(
                 session=session,
                 display_name=display_name or account_name,
                 login_mode="credentials",
                 success_message="Credential login completed and booster authorization is ready.",
             )
+            if result.get("ok"):
+                account = self._find_account_by_profile_id(self._session_store.build_profile_id(session.steam_id))
+                if account is not None:
+                    self._store_client_refresh_token(account, auth_result)
+                    self._sync_runtime_profiles(reason="credential client authorization")
+                    updated_account = self._find_account_by_profile_id(account.profile_id) or account
+                    result["account"] = self._serialize_account(updated_account)
+                    result["state"] = self.get_bootstrap_state()
+            return result
         except SteamAuthenticationError as exc:
             steam_guard_result = self._steam_guard_required_result(exc)
             if steam_guard_result is not None:
@@ -634,19 +653,21 @@ class DesktopApi:
             return self._error_result(exc)
 
         _console_log_finish_booster(
-            "Finish booster sign-in completed successfully. login_key_cache=%s"
+            "Finish booster sign-in completed successfully. client_auth_cache=%s"
             % getattr(auth_result, "cache_path", "unknown")
         )
+        self._store_client_refresh_token(account, auth_result)
         self._append_activity(
             "Steam client authorization prepared for %s."
             % self._account_identity_label(account)
         )
         self._sync_runtime_profiles(reason="client authorization")
+        updated_account = self._find_account_by_profile_id(account.profile_id) or account
         return {
             "ok": True,
             "status": "authorized",
-            "message": "Steam client authorization is ready for %s." % self._account_identity_label(account),
-            "account": self._serialize_account(account),
+            "message": "Steam client authorization is ready for %s." % self._account_identity_label(updated_account),
+            "account": self._serialize_account(updated_account),
             "state": self.get_bootstrap_state(),
         }
 
@@ -987,6 +1008,44 @@ class DesktopApi:
             steam_guard_code_kind=steam_guard_code_kind,
         )
 
+    def _store_client_refresh_token(self, account: AccountProfile, auth_result: Any) -> None:
+        refresh_token = str(getattr(auth_result, "refresh_token", "") or "").strip()
+        if not refresh_token:
+            return
+
+        session_path = str(account.session_bundle_path or "").strip()
+        bundle = self._session_store.load_bundle_path(session_path) if session_path else None
+        if bundle is None:
+            bundle = {}
+
+        bundle["steam_id"] = str(getattr(auth_result, "steam_id", "") or account.steam_id or "").strip()
+        bundle["account_name"] = str(getattr(auth_result, "account_name", "") or account.account_name or "").strip()
+        bundle[CLIENT_REFRESH_TOKEN_KEY] = refresh_token
+        bundle[CLIENT_REFRESH_TOKEN_UPDATED_AT_KEY] = datetime.now().isoformat(timespec="seconds")
+        bundle[CLIENT_REFRESH_TOKEN_EXPIRES_AT_KEY] = int(getattr(auth_result, "token_expires_at", 0) or 0)
+        bundle[CLIENT_REFRESH_TOKEN_SOURCE_KEY] = str(getattr(auth_result, "source", "") or "steam-user")
+        self._session_store.save_bundle(account.profile_id, bundle)
+
+        next_steam_id = str(bundle.get("steam_id", "") or "").strip()
+        next_account_name = str(bundle.get("account_name", "") or "").strip()
+        mutated = False
+        for index, existing in enumerate(self._config.accounts):
+            if existing.profile_id != account.profile_id:
+                continue
+            updated = existing
+            if next_steam_id and next_steam_id != existing.steam_id:
+                updated = replace(updated, steam_id=next_steam_id)
+            if next_account_name and next_account_name != existing.account_name:
+                updated = replace(updated, account_name=next_account_name)
+            if not existing.session_bundle_path:
+                updated = replace(updated, session_bundle_path=str(self._session_store.bundle_path(account.profile_id)))
+            if updated != existing:
+                self._config.accounts[index] = updated
+                mutated = True
+            break
+        if mutated:
+            self._persist()
+
     def _revalidate_saved_session_bundles(self) -> None:
         if not self._config.accounts:
             return
@@ -1029,6 +1088,9 @@ class DesktopApi:
             return account, False
 
         refreshed_bundle = self._stamp_session_bundle(dict(session.session_bundle))
+        for key in CLIENT_REFRESH_BUNDLE_KEYS:
+            if key in bundle and key not in refreshed_bundle:
+                refreshed_bundle[key] = bundle[key]
         self._session_store.save_bundle(account.profile_id, refreshed_bundle)
         self._append_activity("Validated saved session bundle for %s." % self._account_identity_label(account))
 
@@ -1164,6 +1226,7 @@ class DesktopApi:
 
     def _client_guard_required_result(self, exc: SteamClientGuardRequiredError) -> Dict[str, Any]:
         code_kind = str(exc.code_kind or "generic").strip().lower() or "generic"
+        associated_message = str(getattr(exc, "associated_message", "") or "")
         return {
             "ok": False,
             "status": "steam_guard_required",
@@ -1171,8 +1234,8 @@ class DesktopApi:
             "error_type": exc.__class__.__name__,
             "code_kind": code_kind,
             "code_label": self._steam_guard_code_label(code_kind),
-            "code_placeholder": self._steam_guard_code_placeholder(code_kind, ""),
-            "associated_message": "",
+            "code_placeholder": self._steam_guard_code_placeholder(code_kind, associated_message),
+            "associated_message": associated_message,
         }
 
     @staticmethod

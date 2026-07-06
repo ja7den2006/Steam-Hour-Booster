@@ -61,6 +61,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "steam_hour_booster.web" = ["template.html", "styles.css", "app.js"]
+"steam_hour_booster.node" = ["steam_client_bridge.cjs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

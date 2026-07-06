@@ -28,6 +28,7 @@ def test_session_store_summarizes_bundle_file(tmp_path) -> None:
         {
             "steam_id": "7656119",
             "refresh_token": "refresh",
+            "client_refresh_token": "client-refresh",
             "access_token": "access",
             "session_id": "session",
         },
@@ -38,5 +39,6 @@ def test_session_store_summarizes_bundle_file(tmp_path) -> None:
     assert summary["exists"] is True
     assert summary["steam_id"] == "7656119"
     assert summary["has_refresh_token"] is True
+    assert summary["has_client_refresh_token"] is True
     assert summary["has_access_token"] is True
     assert summary["has_session_id"] is True

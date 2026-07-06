@@ -74,6 +74,7 @@ class SessionStore:
             "modified_at": modified_at,
             "steam_id": str(payload.get("steam_id", "")),
             "has_refresh_token": bool(payload.get("refresh_token")),
+            "has_client_refresh_token": bool(payload.get("client_refresh_token")),
             "has_access_token": bool(payload.get("access_token")),
             "has_session_id": bool(payload.get("session_id")),
         }

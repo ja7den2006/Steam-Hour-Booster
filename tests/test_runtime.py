@@ -196,6 +196,84 @@ def test_live_runtime_marks_web_only_bundle_as_needing_auth_instead_of_error(tmp
     assert started.state == RuntimeState.NEEDS_AUTH
 
 
+def test_live_runtime_uses_client_refresh_token_alongside_web_session(tmp_path) -> None:
+    steam_id = "76561197960287930"
+    client_refresh_token = build_client_refresh_token(steam_id)
+    web_refresh_token = build_web_refresh_token(steam_id)
+    created_clients = []
+
+    class FakeLiveClient:
+        def __init__(self):
+            self.connected = False
+            self.logged_on = False
+            self.played_calls = []
+            created_clients.append(self)
+
+        def set_credential_location(self, path):
+            self.credential_location = path
+
+        def login_with_refresh_token(self, refresh_token, steam_id, account_name=""):
+            self.connected = True
+            self.logged_on = True
+            self.refresh_token = refresh_token
+            self.steam_id = steam_id
+            self.account_name = account_name
+            return EResult.OK
+
+        def change_status(self, **kwargs):
+            return None
+
+        def games_played(self, app_ids):
+            self.played_calls.append(list(app_ids))
+
+        def sleep(self, seconds):
+            time.sleep(0.01)
+
+        def logout(self):
+            self.logged_on = False
+            self.connected = False
+
+        def disconnect(self):
+            self.connected = False
+
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle(
+        "steam_7656119",
+        {
+            "steam_id": steam_id,
+            "refresh_token": web_refresh_token,
+            "client_refresh_token": client_refresh_token,
+        },
+    )
+    runtime = SteamNetworkBoosterRuntime(
+        session_store=session_store,
+        client_factory=FakeLiveClient,
+        start_timeout=2.0,
+        sleep_interval=0.01,
+    )
+    controller = RuntimeController(session_store=session_store, transport=runtime)
+    account = AccountProfile(
+        profile_id="steam_7656119",
+        display_name="Primary",
+        account_name="primary_account",
+        steam_id=steam_id,
+        session_bundle_path=str(bundle_path),
+        games=[IdleGame(app_id=730)],
+    )
+
+    snapshot = controller.refresh_accounts([account]).to_dict()
+    started = controller.start_profile("steam_7656119", [account])
+
+    status = snapshot["statuses"][0]
+    assert status["runtime_ready"] is True
+    assert status["state"] == "ready"
+    assert started.state == RuntimeState.BOOSTING
+    assert created_clients[0].refresh_token == client_refresh_token
+    assert created_clients[0].played_calls[-1] == [730]
+
+    controller.stop_profile("steam_7656119", [account])
+
+
 def test_live_runtime_starts_with_cached_login_key_when_bundle_is_web_only(tmp_path) -> None:
     steam_id = "76561197960287930"
     created_clients = []
@@ -477,7 +555,7 @@ def test_refresh_token_client_login_builds_client_logon_message() -> None:
 
     assert result == EResult.OK
     assert client.sent.body.access_token
-    assert client.sent.body.account_name == "primary_account"
+    assert client.sent.body.account_name == ""
     assert client.sent.body.should_remember_password is True
     assert client.sent.body.obfuscated_private_ip.v4 == 77
     assert str(client.sent.header.steamid) == steam_id
