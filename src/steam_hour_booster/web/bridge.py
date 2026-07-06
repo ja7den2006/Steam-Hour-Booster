@@ -436,6 +436,65 @@ class DesktopApi:
         except Exception as exc:
             return self._error_result(exc)
 
+    def set_account_boost_enabled(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        values = payload or {}
+
+        try:
+            profile_id = self._normalize_required_string(values.get("profile_id"), "profile id")
+            if "boost_enabled" not in values:
+                raise SteamValidationError("Boost enabled state is required.")
+            boost_enabled = self._normalize_bool(values.get("boost_enabled"))
+        except Exception as exc:
+            return self._error_result(exc)
+
+        account = self._find_account_by_profile_id(profile_id)
+        if account is None:
+            return self._message_result(
+                ok=False,
+                status="not_found",
+                message="That account profile was not found.",
+            )
+
+        if boost_enabled == account.boost_enabled:
+            state_label = "enabled" if boost_enabled else "disabled"
+            return {
+                "ok": True,
+                "status": "unchanged",
+                "message": "Booster is already %s for %s." % (
+                    state_label,
+                    self._account_identity_label(account),
+                ),
+                "account": self._serialize_account(account),
+                "state": self.get_bootstrap_state(),
+            }
+
+        result = self.save_account_profile(
+            {
+                "profile_id": account.profile_id,
+                "display_name": account.display_name,
+                "boost_enabled": boost_enabled,
+                "appear_online": account.appear_online,
+                "persona_state": account.persona_state,
+                "conflict_policy": account.conflict_policy,
+                "custom_status": account.custom_status,
+                "auto_reply_enabled": account.auto_reply_enabled,
+                "auto_reply_message": account.auto_reply_message,
+                "auto_reply_cooldown_seconds": account.auto_reply_cooldown_seconds,
+                "auto_reply_timeout_seconds": account.auto_reply_timeout_seconds,
+                "games": [game.to_dict() for game in account.games],
+                "notes": account.notes,
+            }
+        )
+
+        if result.get("ok") and result.get("message") == "Account profile saved.":
+            result["status"] = "updated"
+            result["message"] = "Booster %s for %s." % (
+                "enabled" if boost_enabled else "disabled",
+                self._account_identity_label(account),
+            )
+
+        return result
+
     def refresh_runtime_state(self) -> Dict[str, Any]:
         self._sync_runtime_profiles(reason="manual refresh")
         return {
@@ -1082,6 +1141,15 @@ class DesktopApi:
             "games": [game.to_dict() for game in account.games],
             "games_text": self._format_games_text(account.games),
         }
+
+    @staticmethod
+    def _account_identity_label(account: AccountProfile) -> str:
+        return (
+            str(account.display_name or "").strip()
+            or str(account.account_name or "").strip()
+            or str(account.steam_id or "").strip()
+            or str(account.profile_id or "").strip()
+        )
 
     @staticmethod
     def _format_games_text(games: List[IdleGame]) -> str:

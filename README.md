@@ -61,6 +61,18 @@ pip install -e .[dev]
 python -m steam_hour_booster
 ```
 
+PowerShell shortcut on Windows:
+
+```powershell
+.\run_dev.ps1
+```
+
+If you already installed dependencies and only want to relaunch the shell:
+
+```powershell
+.\run_dev.ps1 -SkipInstall
+```
+
 Run tests:
 
 ```bash
@@ -73,6 +85,7 @@ pytest -q
 - `SteamCommunityKit` is used only for authentication/session workflows in this app.
 - `ValvePython/steam` is used for the Steam client protocol runtime that sends the played-game slot set.
 - The desktop shell is delivered as a custom HTML/CSS/JS surface inside a local `pywebview` host so it remains compatible with the current Python `3.8` environment.
+- On Windows, `pywebview` expects an available WebView runtime. If the shell opens blank on a clean machine, install Microsoft Edge WebView2 Runtime first.
 - The shell remains portable because the UI surface is web-based, so moving only the host to a Go/Wails shell later is still possible without throwing away the front-end work.
 - Account session bundles are stored under local app data instead of being embedded in the main config payload.
 

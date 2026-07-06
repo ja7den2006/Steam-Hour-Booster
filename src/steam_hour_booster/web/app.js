@@ -252,6 +252,17 @@ function bindAccountActions() {
       await handleMutationResult(result, {
         successMessage: result?.message || 'Account removed.',
       });
+    } else if (action === 'toggle-boost' && profileId) {
+      target.disabled = true;
+      try {
+        await setAccountBoostEnabled(
+          profileId,
+          target.dataset.nextBoostEnabled === 'true',
+          'editor',
+        );
+      } finally {
+        target.disabled = false;
+      }
     }
   });
 
@@ -326,6 +337,14 @@ function bindRuntimeActions() {
           await startRuntimeLane(target.dataset.profileId);
         } else if (action === 'stop') {
           await stopRuntimeLane(target.dataset.profileId);
+        } else if (action === 'toggle-boost') {
+          await setAccountBoostEnabled(
+            target.dataset.profileId,
+            target.dataset.nextBoostEnabled === 'true',
+            'runtime',
+          );
+        } else if (action === 'edit') {
+          await focusAccountProfile(target.dataset.profileId);
         }
       } finally {
         target.disabled = false;
@@ -436,6 +455,7 @@ function fillAccounts() {
 
   state.accounts.forEach((account) => {
     const runtimeStatus = getRuntimeStatusByProfileId(account.profile_id);
+    const boostActionLabel = account.boost_enabled ? 'Disable Booster' : 'Enable Booster';
     const item = document.createElement('div');
     item.className = `account-item${shellState.selectedAccountProfileId === account.profile_id ? ' account-item--selected' : ''}`;
     item.dataset.accountSelect = 'true';
@@ -448,6 +468,7 @@ function fillAccounts() {
         </div>
         <div class="account-item__actions">
           <span class="pill pill--subtle">${escapeHtml(account.login_mode)}</span>
+          <button class="ghost-button" data-account-action="toggle-boost" data-profile-id="${escapeHtml(account.profile_id)}" data-next-boost-enabled="${account.boost_enabled ? 'false' : 'true'}">${escapeHtml(boostActionLabel)}</button>
           <button class="ghost-button" data-account-action="remove" data-profile-id="${escapeHtml(account.profile_id)}">Remove</button>
         </div>
       </div>
@@ -624,6 +645,7 @@ function fillRuntimeAccounts(statuses) {
   }
 
   statuses.forEach((status) => {
+    const boostActionLabel = status.boost_enabled ? 'Disable Booster' : 'Enable Booster';
     const item = document.createElement('div');
     item.className = 'runtime-account';
     item.innerHTML = `
@@ -634,6 +656,8 @@ function fillRuntimeAccounts(statuses) {
         </div>
         <div class="runtime-account__actions">
           <span class="runtime-state runtime-state--${escapeHtml(status.state)}">${escapeHtml(status.state_label || status.state)}</span>
+          <button class="ghost-button" data-runtime-action="edit" data-profile-id="${escapeHtml(status.profile_id)}">Edit</button>
+          <button class="ghost-button" data-runtime-action="toggle-boost" data-profile-id="${escapeHtml(status.profile_id)}" data-next-boost-enabled="${status.boost_enabled ? 'false' : 'true'}">${escapeHtml(boostActionLabel)}</button>
           <button class="ghost-button" data-runtime-action="start" data-profile-id="${escapeHtml(status.profile_id)}" ${status.can_start ? '' : 'disabled'}>Start</button>
           <button class="ghost-button" data-runtime-action="stop" data-profile-id="${escapeHtml(status.profile_id)}" ${status.can_stop ? '' : 'disabled'}>Stop</button>
         </div>
@@ -1456,6 +1480,31 @@ async function stopRuntimeLane(profileId) {
     target: 'runtime',
     successMessage: result?.message || 'Boost lane stopped.',
   });
+}
+
+async function setAccountBoostEnabled(profileId, boostEnabled, target = 'editor') {
+  const actionLabel = boostEnabled ? 'Enabling' : 'Disabling';
+  if (target === 'runtime') {
+    setRuntimeStatus('info', `${actionLabel} the booster for this account.`);
+  } else {
+    setEditorStatus('info', `${actionLabel} the booster for this account.`);
+  }
+  const result = await callApi('set_account_boost_enabled', {
+    profile_id: profileId,
+    boost_enabled: boostEnabled,
+  });
+  await handleMutationResult(result, {
+    target,
+    selectProfileId: profileId,
+    successMessage: result?.message || (boostEnabled ? 'Booster enabled.' : 'Booster disabled.'),
+  });
+}
+
+async function focusAccountProfile(profileId) {
+  shellState.selectedAccountProfileId = profileId;
+  fillAccounts();
+  fillAccountEditor();
+  await selectPage('dashboard', true);
 }
 
 async function openRuntimeLogFile() {

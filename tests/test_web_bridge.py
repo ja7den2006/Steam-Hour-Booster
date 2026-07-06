@@ -576,6 +576,81 @@ def test_save_account_profile_requires_message_when_auto_reply_enabled(tmp_path)
     assert "Auto-reply message is required" in result["message"]
 
 
+def test_set_account_boost_enabled_stops_active_lane(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    bundle_path = session_store.save_bundle("steam_7656119", {"steam_id": "7656119", "refresh_token": "refresh"})
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                account_name="primary_account",
+                steam_id="7656119",
+                login_mode="credentials",
+                session_bundle_path=str(bundle_path),
+                games=[IdleGame(app_id=730)],
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+        runtime_controller=preview_runtime_controller(session_store),
+    )
+
+    started = api.start_account_runtime("steam_7656119")
+    updated = api.set_account_boost_enabled(
+        {
+            "profile_id": "steam_7656119",
+            "boost_enabled": False,
+        }
+    )
+
+    assert started["ok"] is True
+    assert updated["ok"] is True
+    assert "disabled" in updated["message"].lower()
+    runtime_status = updated["state"]["runtime"]["statuses"][0]
+    assert runtime_status["state"] == "idle"
+    assert runtime_status["boost_enabled"] is False
+    assert runtime_status["can_start"] is False
+
+
+def test_set_account_boost_enabled_reports_unchanged_state(tmp_path) -> None:
+    store = ConfigStore(path=tmp_path / "config.json")
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    config = AppConfig(
+        accounts=[
+            AccountProfile(
+                profile_id="steam_7656119",
+                display_name="Primary",
+                steam_id="7656119",
+                boost_enabled=False,
+            )
+        ]
+    )
+    api = DesktopApi(
+        config_store=store,
+        config=config,
+        auth_gateway=FakeAuthGateway(),
+        session_store=session_store,
+    )
+
+    result = api.set_account_boost_enabled(
+        {
+            "profile_id": "steam_7656119",
+            "boost_enabled": False,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "unchanged"
+    assert "already disabled" in result["message"].lower()
+    assert result["account"]["boost_enabled"] is False
+
+
 def test_save_account_profile_rejects_too_many_slots(tmp_path) -> None:
     store = ConfigStore(path=tmp_path / "config.json")
     session_store = SessionStore(base_dir=tmp_path / "sessions")
