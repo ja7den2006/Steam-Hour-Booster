@@ -11,6 +11,13 @@ from steam_hour_booster.web.assets import load_shell_html
 from steam_hour_booster.web.bridge import DesktopApi
 
 
+def resolve_window_icon_path() -> Optional[Path]:
+    candidate = Path(__file__).resolve().parents[2] / "tmp" / "steam_icon.ico"
+    if candidate.exists():
+        return candidate
+    return None
+
+
 def create_api(config_store: Optional[ConfigStore] = None) -> DesktopApi:
     resolved_store = config_store or ConfigStore()
     config = resolved_store.load()
@@ -44,6 +51,7 @@ def main() -> int:
     ensure_runtime_directories()
     storage_path = Path(app_data_dir()) / "webview"
     storage_path.mkdir(parents=True, exist_ok=True)
+    icon_path = resolve_window_icon_path()
 
     api = create_api()
     create_window(api)
@@ -51,5 +59,6 @@ def main() -> int:
         debug=False,
         private_mode=True,
         storage_path=str(storage_path),
+        icon=str(icon_path) if icon_path else None,
     )
     return 0
