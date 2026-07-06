@@ -173,6 +173,38 @@ class MissingLoginKeyClient(LoginKeyEventClient):
         return None
 
 
+class FailingGuardCodeClient:
+    def __init__(self) -> None:
+        self.login_calls = []
+        self.connected = False
+        self.logged_on = False
+
+    def set_credential_location(self, path):
+        self.credential_location = path
+
+    def connect(self, retry=0):
+        self.connected = True
+        return True
+
+    def login(self, username, password="", login_key=None, auth_code=None, two_factor_code=None):
+        self.login_calls.append(
+            {
+                "username": username,
+                "password": password,
+                "login_key": login_key,
+                "auth_code": auth_code,
+                "two_factor_code": two_factor_code,
+            }
+        )
+        return EResult.Fail
+
+    def logout(self):
+        self.logged_on = False
+
+    def disconnect(self):
+        self.connected = False
+
+
 def test_client_auth_gateway_waits_for_login_key_event(tmp_path) -> None:
     session_store = SessionStore(base_dir=tmp_path / "sessions")
     gateway = SteamClientAuthGateway(
@@ -211,3 +243,31 @@ def test_client_auth_gateway_errors_when_login_key_never_arrives(tmp_path) -> No
         assert "did not issue a reusable login key" in str(exc)
     else:
         raise AssertionError("Expected SteamClientAuthError when login key never arrives.")
+
+
+def test_client_auth_gateway_does_not_retry_unknown_guard_code_as_email(tmp_path) -> None:
+    session_store = SessionStore(base_dir=tmp_path / "sessions")
+    failing_client = FailingGuardCodeClient()
+    gateway = SteamClientAuthGateway(
+        session_store=session_store,
+        client_factory=lambda: failing_client,
+        login_key_timeout_seconds=0.1,
+    )
+
+    try:
+        gateway.authorize_credentials(
+            profile_id="steam_7656119",
+            account_name="demo",
+            steam_id="7656119",
+            password="secret",
+            steam_guard_code="ABCDE",
+            steam_guard_code_kind="",
+        )
+    except SteamClientAuthError:
+        pass
+    else:
+        raise AssertionError("Expected SteamClientAuthError for failing guard-code login.")
+
+    assert len(failing_client.login_calls) == 1
+    assert failing_client.login_calls[0]["two_factor_code"] == "ABCDE"
+    assert failing_client.login_calls[0]["auth_code"] is None
