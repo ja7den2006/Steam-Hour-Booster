@@ -5,7 +5,27 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const SteamUser = require('steam-user');
+function requireDependency(name) {
+  try {
+    return require(name);
+  } catch (error) {
+    const candidates = [
+      path.resolve(__dirname, '..', '..', 'node_modules', name),
+      path.resolve(__dirname, '..', 'node_modules', name),
+      path.resolve(process.cwd(), 'node_modules', name),
+    ];
+
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return require(candidate);
+      }
+    }
+
+    throw error;
+  }
+}
+
+const SteamUser = requireDependency('steam-user');
 
 const DEFAULT_TIMEOUT_MS = 75000;
 const DEFAULT_MACHINE_NAME = 'Steam Hour Booster';

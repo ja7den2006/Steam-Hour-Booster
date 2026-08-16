@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 from steam_hour_booster.session_store import SessionStore
 
@@ -148,8 +150,8 @@ class SteamClientAuthGateway:
         if self._bridge_runner is not None:
             return dict(self._bridge_runner(dict(payload)))
 
-        node_path = shutil.which(self._node_executable) or self._node_executable
-        if not Path(node_path).name and not Path(node_path).exists():
+        node_path = self._resolve_node_executable()
+        if not node_path:
             raise SteamClientAuthError("Node.js is required for Steam client authorization, but it was not found.")
         if not self._bridge_script.exists():
             raise SteamClientAuthError("Steam client bridge script is missing: %s" % self._bridge_script)
@@ -191,6 +193,59 @@ class SteamClientAuthGateway:
     @staticmethod
     def _default_bridge_script() -> Path:
         return Path(__file__).resolve().parents[1] / "node" / "steam_client_bridge.cjs"
+
+    def _resolve_node_executable(self) -> str:
+        for candidate in self._candidate_node_paths(self._node_executable):
+            if candidate.exists():
+                return str(candidate)
+
+        resolved = shutil.which(self._node_executable)
+        if resolved:
+            return resolved
+
+        return self._node_executable if Path(self._node_executable).name != self._node_executable else ""
+
+    @staticmethod
+    def _candidate_node_paths(node_executable: str) -> List[Path]:
+        executable_name = "node.exe" if os.name == "nt" else "node"
+        normalized = str(node_executable or "").strip() or executable_name
+        candidates: List[Path] = []
+
+        env_path = str(os.getenv("STEAM_HOUR_BOOSTER_NODE", "") or "").strip()
+        if env_path:
+            candidates.append(Path(env_path))
+
+        requested = Path(normalized)
+        if requested.name != normalized or requested.is_absolute():
+            candidates.append(requested)
+
+        runtime_bases: List[Path] = []
+        frozen_base = str(getattr(sys, "_MEIPASS", "") or "").strip()
+        if frozen_base:
+            runtime_bases.append(Path(frozen_base).resolve())
+        if getattr(sys, "frozen", False):
+            runtime_bases.append(Path(sys.executable).resolve().parent)
+        runtime_bases.append(Path.cwd().resolve())
+
+        for base in runtime_bases:
+            candidates.extend(
+                [
+                    base / "node_runtime" / executable_name,
+                    base / "_internal" / "node_runtime" / executable_name,
+                ]
+            )
+
+        project_root = Path(__file__).resolve().parents[2]
+        candidates.append(project_root / "node_runtime" / executable_name)
+
+        unique_candidates: List[Path] = []
+        seen = set()
+        for candidate in candidates:
+            key = str(candidate)
+            if key not in seen:
+                seen.add(key)
+                unique_candidates.append(candidate)
+        return unique_candidates
 
     @staticmethod
     def _coerce_int(value: object) -> int:

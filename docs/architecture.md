@@ -69,6 +69,15 @@ App state is stored under `%LOCALAPPDATA%\\SteamHourBooster`:
 
 Secrets should not be written into the main config payload.
 
+## Release Packaging
+
+GitHub release tags trigger the Windows packaging workflow:
+
+- PyInstaller builds the portable desktop app folder.
+- The workflow bundles `node.exe` and `node_modules` so Steam client authorization works without a user-installed Node.js runtime.
+- Inno Setup wraps the portable app into a per-user Windows installer.
+- The generated uninstaller removes installed app files but intentionally leaves `%LOCALAPPDATA%\\SteamHourBooster` account/session data in place.
+
 ## Current Deliverables
 
 - repo/package scaffold
@@ -85,4 +94,5 @@ Secrets should not be written into the main config payload.
 - cached login-key reuse, conflict policy handling, and live slot/persona updates for active lanes
 - persistent runtime event logging surfaced in the shell and written to disk
 - in-app file/folder actions and runtime snapshot export for operator workflows
+- tag-driven GitHub release workflow that publishes a Windows installer
 - tests for config, auth mapping, session storage, and desktop bridge workflows

@@ -1,0 +1,128 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the v prefix, for example 0.1.0"
+        required: false
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          if ($version -eq "" -or $version -eq "main") {
+            $version = "${{ inputs.version }}"
+          }
+          if ($version.StartsWith("v")) {
+            $version = $version.Substring(1)
+          }
+          if ($version -eq "") {
+            $version = "0.1.0"
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "Resolved release version $version"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install pyinstaller
+
+      - name: Install Node bridge dependencies
+        run: npm ci
+
+      - name: Validate
+        shell: pwsh
+        run: |
+          python -m pytest
+          npm run smoke:steam-bridge
+          python -m compileall src
+
+      - name: Resolve Node executable
+        id: node
+        shell: pwsh
+        run: |
+          $nodePath = (Get-Command node).Source
+          "path=$nodePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "Using Node at $nodePath"
+
+      - name: Build portable app
+        shell: pwsh
+        run: |
+          pyinstaller `
+            --noconfirm `
+            --clean `
+            --name SteamHourBooster `
+            --windowed `
+            --onedir `
+            --collect-all webview `
+            --collect-all steam `
+            --collect-all steamcommunitykit `
+            --collect-submodules steam_hour_booster `
+            --collect-data steam_hour_booster `
+            --add-data "node_modules;node_modules" `
+            --add-binary "${{ steps.node.outputs.path }};node_runtime" `
+            src\steam_hour_booster\__main__.py
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist\installer | Out-Null
+          $env:APP_BUILD_DIR = (Resolve-Path dist\SteamHourBooster).Path
+          $env:INSTALLER_OUTPUT_DIR = (Resolve-Path dist\installer).Path
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\SteamHourBooster.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SteamHourBooster-Setup-${{ env.APP_VERSION }}
+          path: dist/installer/*.exe
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Steam Hour Booster ${{ github.ref_name }}
+          prerelease: true
+          files: dist/installer/*.exe
+          body: |
+            Steam Hour Booster ${{ github.ref_name }}
+
+            This prerelease includes a Windows installer with Start Menu integration, optional desktop shortcut, bundled Python app files, bundled Node runtime for Steam client authorization, and a standard Windows uninstall entry.
+
+            Notes:
+            - This is still an alpha desktop build.
+            - Account/session data remains under `%LOCALAPPDATA%\SteamHourBooster`.
+            - The installer removes app files during uninstall; it intentionally does not delete local account/session data.

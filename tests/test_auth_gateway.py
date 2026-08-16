@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 
 from steam_hour_booster.auth.client import (
@@ -232,3 +233,18 @@ def test_client_auth_gateway_surfaces_bridge_errors(tmp_path) -> None:
         pass
     else:
         raise AssertionError("Expected SteamClientAuthError.")
+
+
+def test_client_auth_gateway_discovers_bundled_node_runtime(tmp_path, monkeypatch) -> None:
+    runtime_dir = tmp_path / "node_runtime"
+    runtime_dir.mkdir()
+    node_path = runtime_dir / ("node.exe" if os.name == "nt" else "node")
+    node_path.write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    gateway = SteamClientAuthGateway(
+        session_store=SessionStore(base_dir=tmp_path / "sessions"),
+        node_executable="node",
+    )
+
+    assert gateway._resolve_node_executable() == str(node_path)

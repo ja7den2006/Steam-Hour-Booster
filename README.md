@@ -28,12 +28,18 @@ The app is built as a local-first desktop tool. Account sessions, runtime cache,
 ## Requirements
 
 - Windows 10/11.
-- Python 3.8 or newer.
-- Node.js with npm.
 - Microsoft Edge WebView2 Runtime for `pywebview`.
 - A Steam account you own.
 
+For source development, install Python 3.8 or newer and Node.js with npm.
+
 ## Quick Start
+
+Download the latest Windows installer from the GitHub Releases page and run `SteamHourBooster-Setup-<version>.exe`.
+
+The installer adds Start Menu shortcuts, an optional desktop shortcut, and a standard Windows uninstall entry. It bundles the desktop app and Node runtime used for Steam client authorization.
+
+## Source Development
 
 Clone the repository, then run the desktop app from the project root.
 
@@ -93,7 +99,7 @@ Do not commit local runtime data, `.env` files, credentials, screenshots contain
 
 Optional local icon assets can be placed at `tmp\steam_icon.ico` and `tmp\steam_icon.png` for development builds. They are intentionally ignored so branded third-party assets are not redistributed from this repository.
 
-## Development
+## Verification
 
 Run tests:
 
@@ -113,6 +119,17 @@ Compile Python sources:
 python -m compileall src
 ```
 
+## Release Process
+
+Installer releases are produced by GitHub Actions. Push a version tag to run the Windows packaging workflow:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow runs the test suite, verifies the Node Steam bridge, builds a PyInstaller desktop app folder, wraps it with Inno Setup, uploads the installer artifact, and publishes a prerelease on GitHub.
+
 ## Architecture
 
 The app is split into clear boundaries:
@@ -130,19 +147,16 @@ The Steam client auth bridge depends on:
 
 ## Current Status
 
-This is an alpha desktop application with a working local runtime path. It is suitable for public source review and local development, but it is not yet packaged as a signed end-user installer.
+This is an alpha desktop application with a working local runtime path and a GitHub Actions workflow that produces a Windows installer on release tags.
 
 Recommended next release hardening:
 
 - Signed Windows build artifact.
-- Installer/uninstaller workflow.
-- First-run dependency checks inside the UI.
 - Clearer release notes and screenshots.
-- Upstream tracking for `steam-user` transitive npm audit advisories.
 
 ## Known Dependency Note
 
-`steam-user` currently pulls a transitive `steam-appticket` dependency that npm audit flags through an older nested `protobufjs`. The app needs the current `steam-user` 5.x refresh-token path; npm's suggested forced audit fix downgrades `steam-user` and is not compatible with the runtime. Track upstream fixes before publishing packaged binaries.
+`steam-user` currently pulls a transitive `steam-appticket` dependency that npm audit flags through an older nested `protobufjs`. The app needs the current `steam-user` 5.x refresh-token path; npm's suggested forced audit fix downgrades `steam-user` and is not compatible with the runtime.
 
 ## License
 
