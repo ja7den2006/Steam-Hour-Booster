@@ -124,8 +124,8 @@ python -m compileall src
 Installer releases are produced by GitHub Actions. Push a version tag to run the Windows packaging workflow:
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 The workflow runs the test suite, verifies the Node Steam bridge, builds a PyInstaller desktop app folder, wraps it with Inno Setup, uploads the installer artifact, and publishes a prerelease on GitHub.

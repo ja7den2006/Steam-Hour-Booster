@@ -5,7 +5,7 @@
 
 #define EnvAppVersion GetEnv("APP_VERSION")
 #if EnvAppVersion == ""
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #else
 #define MyAppVersion EnvAppVersion
 #endif
@@ -43,6 +43,7 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayName={#MyAppName}
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Installer
