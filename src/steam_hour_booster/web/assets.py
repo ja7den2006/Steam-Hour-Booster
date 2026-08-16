@@ -6,7 +6,8 @@ from pathlib import Path
 
 WEB_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = WEB_DIR.parents[2]
-STEAM_ICON_PATH = PROJECT_ROOT / "tmp" / "steam_icon.png"
+PACKAGED_STEAM_ICON_PATH = WEB_DIR / "static" / "steam_icon.png"
+LOCAL_STEAM_ICON_PATH = PROJECT_ROOT / "tmp" / "steam_icon.png"
 FALLBACK_STEAM_ICON_SVG = """
 <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
   <circle cx="32" cy="32" r="30" fill="#111821"/>
@@ -28,8 +29,9 @@ def _data_url_from_bytes(payload: bytes, mime_type: str) -> str:
 
 
 def _steam_icon_src() -> str:
-    if STEAM_ICON_PATH.exists():
-        return _data_url_from_bytes(STEAM_ICON_PATH.read_bytes(), "image/png")
+    for icon_path in (PACKAGED_STEAM_ICON_PATH, LOCAL_STEAM_ICON_PATH):
+        if icon_path.exists():
+            return _data_url_from_bytes(icon_path.read_bytes(), "image/png")
     return _data_url_from_bytes(FALLBACK_STEAM_ICON_SVG.encode("utf-8"), "image/svg+xml")
 
 

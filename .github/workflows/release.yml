@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version without the v prefix, for example 0.1.1"
+        description: "Release version without the v prefix, for example 0.1.2"
         required: false
-        default: "0.1.1"
+        default: "0.1.2"
 
 permissions:
   contents: write
@@ -33,7 +33,7 @@ jobs:
             $version = $version.Substring(1)
           }
           if ($version -eq "") {
-            $version = "0.1.1"
+            $version = "0.1.2"
           }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           "Resolved release version $version"
@@ -88,6 +88,7 @@ jobs:
             --collect-all steamcommunitykit `
             --collect-submodules steam_hour_booster `
             --collect-data steam_hour_booster `
+            --icon "src\steam_hour_booster\assets\steam_icon.ico" `
             --add-data "node_modules;node_modules" `
             --add-binary "${{ steps.node.outputs.path }};node_runtime" `
             src\steam_hour_booster\__main__.py
@@ -115,14 +116,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Steam Hour Booster ${{ github.ref_name }}
-          prerelease: true
+          prerelease: false
           files: dist/installer/*.exe
           body: |
             Steam Hour Booster ${{ github.ref_name }}
 
-            This prerelease includes a Windows installer with Start Menu integration, optional desktop shortcut, bundled Python app files, bundled Node runtime for Steam client authorization, and a standard Windows uninstall entry.
+            This release includes a Windows installer with Start Menu integration, optional desktop shortcut, bundled Python app files, bundled Node runtime for Steam client authorization, packaged app icons, and a standard Windows uninstall entry.
 
             Notes:
-            - This is still an alpha desktop build.
             - Account/session data remains under `%LOCALAPPDATA%\SteamHourBooster`.
             - The installer removes app files during uninstall; it intentionally does not delete local account/session data.

@@ -12,9 +12,14 @@ from steam_hour_booster.web.bridge import DesktopApi
 
 
 def resolve_window_icon_path() -> Optional[Path]:
-    candidate = Path(__file__).resolve().parents[2] / "tmp" / "steam_icon.ico"
-    if candidate.exists():
-        return candidate
+    package_dir = Path(__file__).resolve().parent
+    project_root = package_dir.parents[1]
+    for candidate in (
+        package_dir / "assets" / "steam_icon.ico",
+        project_root / "tmp" / "steam_icon.ico",
+    ):
+        if candidate.exists():
+            return candidate
     return None
 
 

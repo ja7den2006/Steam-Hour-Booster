@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "steam-hour-booster"
-version = "0.1.1"
+version = "0.1.2"
 description = "Professional desktop Steam hour booster with SteamCommunityKit-backed authentication and a custom pywebview shell."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -60,7 +60,8 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"steam_hour_booster.web" = ["template.html", "styles.css", "app.js"]
+"steam_hour_booster" = ["assets/steam_icon.ico"]
+"steam_hour_booster.web" = ["template.html", "styles.css", "app.js", "static/steam_icon.png"]
 "steam_hour_booster.node" = ["steam_client_bridge.cjs"]
 
 [tool.pytest.ini_options]

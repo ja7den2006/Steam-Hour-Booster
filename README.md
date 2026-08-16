@@ -25,21 +25,42 @@ The app is built as a local-first desktop tool. Account sessions, runtime cache,
 - Auto-reply settings with custom message, cooldown, and timeout.
 - Runtime event log and in-app diagnostics.
 
+## Install
+
+1. Open the [latest GitHub release](https://github.com/SteamCommunityKit/Steam-Hour-Booster/releases/latest).
+2. Download `SteamHourBooster-Setup-<version>.exe`.
+3. Run the installer.
+4. Open `Steam Hour Booster` from the Start Menu.
+
+The installer bundles the desktop app, Python runtime files, and the Node runtime used for Steam client authorization. You do not need to install Python, Node.js, or npm to use the released app.
+
+Windows may show a SmartScreen prompt because the installer is not code-signed yet. The release is built by GitHub Actions from the source in this repository.
+
 ## Requirements
 
 - Windows 10/11.
-- Microsoft Edge WebView2 Runtime for `pywebview`.
+- Microsoft Edge WebView2 Runtime.
 - A Steam account you own.
 
-For source development, install Python 3.8 or newer and Node.js with npm.
+## Basic Use
 
-## Quick Start
+1. Open the app.
+2. Add a Steam account with username/password or QR login.
+3. If the account shows `Needs Auth`, open the account editor and run `Finish booster sign-in`.
+4. Add game App IDs through presets or custom entries.
+5. Save the account profile.
+6. Start the account from Overview.
 
-Download the latest Windows installer from the GitHub Releases page and run `SteamHourBooster-Setup-<version>.exe`.
+The console panel shows authentication and runtime activity such as account start, stop, reconnect, and conflict state.
 
-The installer adds Start Menu shortcuts, an optional desktop shortcut, and a standard Windows uninstall entry. It bundles the desktop app and Node runtime used for Steam client authorization.
+## Build From Source
 
-## Source Development
+Use this path only if you want to run or modify the project locally instead of using the release installer.
+
+Requirements for source builds:
+
+- Python 3.8 or newer.
+- Node.js with npm.
 
 Clone the repository, then run the desktop app from the project root.
 
@@ -70,17 +91,6 @@ npm install
 python -m steam_hour_booster
 ```
 
-## Basic Use
-
-1. Open the app.
-2. Add a Steam account with username/password or QR login.
-3. If the account shows `Needs Auth`, open the account editor and run `Finish booster sign-in`.
-4. Add game App IDs through presets or custom entries.
-5. Save the account profile.
-6. Start the account from Overview.
-
-The console panel shows authentication and runtime activity such as account start, stop, reconnect, and conflict state.
-
 ## Local Data
 
 Runtime data is stored outside the repository:
@@ -96,8 +106,6 @@ Important paths:
 - `logs\runtime.log`: runtime event log.
 
 Do not commit local runtime data, `.env` files, credentials, screenshots containing account secrets, or the contents of `%LOCALAPPDATA%\SteamHourBooster`.
-
-Optional local icon assets can be placed at `tmp\steam_icon.ico` and `tmp\steam_icon.png` for development builds. They are intentionally ignored so branded third-party assets are not redistributed from this repository.
 
 ## Verification
 
@@ -121,14 +129,14 @@ python -m compileall src
 
 ## Release Process
 
-Installer releases are produced by GitHub Actions. Push a version tag to run the Windows packaging workflow:
+Installer releases are produced by GitHub Actions. Maintainers can push a version tag to run the Windows packaging workflow:
 
 ```powershell
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
-The workflow runs the test suite, verifies the Node Steam bridge, builds a PyInstaller desktop app folder, wraps it with Inno Setup, uploads the installer artifact, and publishes a prerelease on GitHub.
+The workflow runs the test suite, verifies the Node Steam bridge, builds a PyInstaller desktop app folder, wraps it with Inno Setup, uploads the installer artifact, and publishes a GitHub release.
 
 ## Architecture
 
@@ -144,19 +152,6 @@ The Steam client auth bridge depends on:
 
 - `steam-session`: modern Steam auth/session flow.
 - `steam-user`: Steam client login, refresh-token handling, `gamesPlayed`, conflict state, and chat events.
-
-## Current Status
-
-This is an alpha desktop application with a working local runtime path and a GitHub Actions workflow that produces a Windows installer on release tags.
-
-Recommended next release hardening:
-
-- Signed Windows build artifact.
-- Clearer release notes and screenshots.
-
-## Known Dependency Note
-
-`steam-user` currently pulls a transitive `steam-appticket` dependency that npm audit flags through an older nested `protobufjs`. The app needs the current `steam-user` 5.x refresh-token path; npm's suggested forced audit fix downgrades `steam-user` and is not compatible with the runtime.
 
 ## License
 

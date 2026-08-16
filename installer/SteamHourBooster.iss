@@ -5,7 +5,7 @@
 
 #define EnvAppVersion GetEnv("APP_VERSION")
 #if EnvAppVersion == ""
-#define MyAppVersion "0.1.1"
+#define MyAppVersion "0.1.2"
 #else
 #define MyAppVersion EnvAppVersion
 #endif
@@ -48,8 +48,8 @@ VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Installer
 VersionInfoProductName={#MyAppName}
-#if FileExists("..\tmp\steam_icon.ico")
-SetupIconFile=..\tmp\steam_icon.ico
+#if FileExists("..\src\steam_hour_booster\assets\steam_icon.ico")
+SetupIconFile=..\src\steam_hour_booster\assets\steam_icon.ico
 #endif
 
 [Languages]
