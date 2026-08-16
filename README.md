@@ -1,3 +1,6 @@
+<img width="1451" height="1079" alt="image" src="https://github.com/user-attachments/assets/2fe60ff0-4839-4826-982a-128a1c5f83ff" />
+
+
 # Steam Hour Booster
 
 Steam Hour Booster is a desktop app for running Steam played-state hour boosting across one or more Steam accounts. It uses a custom `pywebview` shell, SteamCommunityKit for web authentication, and a Node-backed Steam client bridge for modern Steam client authorization.
